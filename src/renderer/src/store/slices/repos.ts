@@ -46,12 +46,9 @@ import { applyManualRepoOrder, getManualRepoOrder } from '../../../../shared/man
 import { getProjectGroupSubtreeIds } from '../../../../shared/project-groups'
 import { isPathInsideOrEqual } from '../../../../shared/cross-platform-path'
 import { getRepoIdFromWorktreeId } from '../../../../shared/worktree-id'
+import { structuralValuesEqual } from '../../../../shared/structural-value-equality'
 import { selectProjectGroupRemovalTargets } from './project-group-removal-targets'
-import {
-  areValuesEqual,
-  reconcileCatalogRows,
-  reconcileFetchedRepos
-} from './repo-identity-reconcile'
+import { reconcileCatalogRows, reconcileFetchedRepos } from './repo-identity-reconcile'
 import { retainValidFilterRepoIds } from './repo-filter-selection'
 import {
   mergeSshRepoReadoptions,
@@ -992,7 +989,7 @@ function mergeByIdentity<T>(
       changed = true
       continue
     }
-    if (areValuesEqual(merged[index], entry)) {
+    if (structuralValuesEqual(merged[index], entry)) {
       continue
     }
     merged[index] = entry
@@ -1013,7 +1010,8 @@ function unchangedMergeSource<T>(
 
 // Why: the sidebar effect watching these catalog arrays is the only thing that refills the
 // folder path-status cache, so a no-op refetch must not wipe it — nothing would repopulate it.
-function catalogRowsUnchanged<T>(next: readonly T[], previous: readonly T[]): boolean {
+// Element identity only; `structuralValuesEqual` is the structural counterpart.
+function arrayElementsUnchanged<T>(next: readonly T[], previous: readonly T[]): boolean {
   return (
     next === previous ||
     (next.length === previous.length && next.every((row, index) => row === previous[index]))
@@ -1031,19 +1029,10 @@ function mergeFetchedReposForHost(
     const existingHostId = getRepoExecutionHostId(repo)
     return existingHostId !== hostId || fetchedIdentities.has(getRepoHostIdentity(repo))
   })
-  const merged = [...preserved]
-  const indexByIdentity = new Map(merged.map((repo, index) => [getRepoHostIdentity(repo), index]))
-  for (const repo of fetchedWithProjectGroups) {
-    const identity = getRepoHostIdentity(repo)
-    const existingIndex = indexByIdentity.get(identity)
-    if (existingIndex === undefined) {
-      indexByIdentity.set(identity, merged.length)
-      merged.push(repo)
-      continue
-    }
-    merged[existingIndex] = repo
-  }
-  return reconcileFetchedRepos(previous, merged)
+  return reconcileFetchedRepos(
+    previous,
+    mergeByIdentity(preserved, fetchedWithProjectGroups, getRepoHostIdentity)
+  )
 }
 
 function applyInheritedProjectGroups(previous: readonly Repo[], fetched: readonly Repo[]): Repo[] {
@@ -2085,7 +2074,7 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
           pendingSshRepoReadoptions: reconciliation.pendingReadoptions,
           ...reconcileReadoptedSshWorktreeState(s, s.pendingSshRepoReadoptions),
           ...mergedProjectCompatibility,
-          ...(catalogRowsUnchanged(prunedRepos, s.repos)
+          ...(arrayElementsUnchanged(prunedRepos, s.repos)
             ? {}
             : { folderWorkspacePathStatuses: {} }),
           activeRepoId: s.activeRepoId && validRepoIds.has(s.activeRepoId) ? s.activeRepoId : null,
@@ -2238,7 +2227,7 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
           pendingSshRepoReadoptions: reconciliation.pendingReadoptions,
           ...reconcileReadoptedSshWorktreeState(s, s.pendingSshRepoReadoptions),
           ...mergedProjectCompatibility,
-          ...(catalogRowsUnchanged(finalizedRepos, s.repos)
+          ...(arrayElementsUnchanged(finalizedRepos, s.repos)
             ? {}
             : { folderWorkspacePathStatuses: {} }),
           activeRepoId: s.activeRepoId,
@@ -2327,7 +2316,7 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
         const { projectGroups } = mergeFetchedProjectGroupCatalog(catalog, current.projectGroups)
         return {
           projectGroups,
-          ...(catalogRowsUnchanged(projectGroups, current.projectGroups)
+          ...(arrayElementsUnchanged(projectGroups, current.projectGroups)
             ? {}
             : { folderWorkspacePathStatuses: {} })
         }
@@ -2350,7 +2339,7 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
         const { projectGroups } = mergeFetchedProjectGroupCatalog(catalog, s.projectGroups)
         return {
           projectGroups,
-          ...(catalogRowsUnchanged(projectGroups, s.projectGroups)
+          ...(arrayElementsUnchanged(projectGroups, s.projectGroups)
             ? {}
             : { folderWorkspacePathStatuses: {} })
         }
@@ -2414,7 +2403,7 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
         )
         return {
           folderWorkspaces,
-          ...(catalogRowsUnchanged(folderWorkspaces, current.folderWorkspaces)
+          ...(arrayElementsUnchanged(folderWorkspaces, current.folderWorkspaces)
             ? {}
             : { folderWorkspacePathStatuses: {} })
         }
@@ -2452,7 +2441,7 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
         )
         return {
           folderWorkspaces,
-          ...(catalogRowsUnchanged(folderWorkspaces, current.folderWorkspaces)
+          ...(arrayElementsUnchanged(folderWorkspaces, current.folderWorkspaces)
             ? {}
             : { folderWorkspacePathStatuses: {} })
         }
