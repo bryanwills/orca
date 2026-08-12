@@ -18,6 +18,8 @@ describe('orchestration federation lifecycle settlement', () => {
   let workerDispatcher: RpcDispatcher
   let workerCapabilities: string[]
   let failNextAckBeforeDelivery: boolean
+  let ackAttempts: number
+  let transport: OrchestrationEnvironmentTransport
 
   beforeEach(() => {
     homeDb = new OrchestrationDb(':memory:')
@@ -27,7 +29,8 @@ describe('orchestration federation lifecycle settlement', () => {
     workerDispatcher = new RpcDispatcher({ runtime: workerRuntime, methods: ORCHESTRATION_METHODS })
     workerCapabilities = [...(workerRuntime.getStatus().capabilities ?? [])]
     failNextAckBeforeDelivery = false
-    const transport: OrchestrationEnvironmentTransport = {
+    ackAttempts = 0
+    transport = {
       resolve: () => ({
         environmentId: 'environment_windows',
         name: 'windows',
@@ -41,6 +44,9 @@ describe('orchestration federation lifecycle settlement', () => {
             result: { ...workerRuntime.getStatus(), capabilities: workerCapabilities },
             _meta: { runtimeId: workerRuntime.getRuntimeId() }
           }
+        }
+        if (method === 'orchestration.federationAck') {
+          ackAttempts += 1
         }
         if (method === 'orchestration.federationAck' && failNextAckBeforeDelivery) {
           failNextAckBeforeDelivery = false
@@ -123,6 +129,14 @@ describe('orchestration federation lifecycle settlement', () => {
       coordinatorPaneKey: 'tab_coord:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
     })
     return homeDb.createTask({ spec: 'Audit Windows behavior', runId: run.id })
+  }
+
+  function restartHomeRuntime(): void {
+    homeRuntime.stopOrchestrationFederationRelay()
+    homeRuntime = new OrcaRuntimeService(null, undefined, {
+      orchestrationEnvironmentTransport: transport
+    })
+    homeRuntime.setOrchestrationDb(homeDb)
   }
 
   async function sendRemoteCompletion(taskId: string, reportedTaskId: string, sync = true) {
@@ -424,19 +438,33 @@ describe('orchestration federation lifecycle settlement', () => {
     await vi.waitFor(() =>
       expect(workerDb.listPendingFederationRelay(dispatch.id, 'to_home')).toHaveLength(1)
     )
-    const remoteCall = vi.spyOn(homeRuntime, 'callOrchestrationWorkerServer')
     failNextAckBeforeDelivery = true
 
     await homeRuntime.syncOrchestrationFederation()
+    const acknowledgedAfterLoss =
+      (
+        homeDb.getFederatedDispatch(dispatch.id) as unknown as {
+          to_home_acknowledged_sequence?: number
+        }
+      ).to_home_acknowledged_sequence ?? 0
+    restartHomeRuntime()
+    await homeRuntime.syncOrchestrationFederation()
+    const acknowledgedAfterRetry =
+      (
+        homeDb.getFederatedDispatch(dispatch.id) as unknown as {
+          to_home_acknowledged_sequence?: number
+        }
+      ).to_home_acknowledged_sequence ?? 0
+    restartHomeRuntime()
     await homeRuntime.syncOrchestrationFederation()
 
     const observed = {
       homeTask: homeDb.getTask(task.id)?.status,
       workerAttachment: workerDb.getRemoteDispatchAttachment(dispatch.id)?.state,
       pendingWorkerRelay: workerDb.listPendingFederationRelay(dispatch.id, 'to_home').length,
-      ackAttempts: remoteCall.mock.calls.filter(
-        ([, method]) => method === 'orchestration.federationAck'
-      ).length
+      acknowledgedAfterLoss,
+      acknowledgedAfterRetry,
+      ackAttempts
     }
     controller.abort()
     const response = (await sent) as RuntimeRpcResponse<unknown>
@@ -445,6 +473,8 @@ describe('orchestration federation lifecycle settlement', () => {
       homeTask: 'completed',
       workerAttachment: 'succeeded',
       pendingWorkerRelay: 0,
+      acknowledgedAfterLoss: 0,
+      acknowledgedAfterRetry: 1,
       ackAttempts: 2,
       completion: 'completed'
     })
@@ -467,17 +497,13 @@ describe('orchestration federation lifecycle settlement', () => {
     await vi.waitFor(() =>
       expect(workerDb.listPendingFederationRelay(dispatch.id, 'to_home')).toHaveLength(2)
     )
-    const remoteCall = vi.spyOn(homeRuntime, 'callOrchestrationWorkerServer')
-
     await homeRuntime.syncOrchestrationFederation()
 
     const observed = {
       homeTask: homeDb.getTask(task.id)?.status,
       workerAttachment: workerDb.getRemoteDispatchAttachment(dispatch.id)?.state,
       pendingWorkerRelay: workerDb.listPendingFederationRelay(dispatch.id, 'to_home').length,
-      ackAttempts: remoteCall.mock.calls.filter(
-        ([, method]) => method === 'orchestration.federationAck'
-      ).length
+      ackAttempts
     }
     for (const controller of controllers) {
       controller.abort()
