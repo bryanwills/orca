@@ -4735,6 +4735,7 @@ export class OrcaRuntimeService {
         }
         if (!this.getOrchestrationDb().isFederatedDispatchRelayEligible(dispatch.dispatch_id)) {
           this.orchestrationFederationTimers.delete(dispatch.dispatch_id)
+          this.orchestrationFederationWarnings.delete(dispatch.dispatch_id)
           return
         }
         const timer = setTimeout(tick, retryDelayMs)

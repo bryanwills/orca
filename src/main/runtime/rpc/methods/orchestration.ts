@@ -481,7 +481,10 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
                 }
               )
             : outcome
-              ? { action: outcome === 'succeeded' ? ('completed' as const) : ('failed' as const) }
+              ? {
+                  action: outcome === 'succeeded' ? ('completed' as const) : ('failed' as const),
+                  authority: 'worker_server_legacy' as const
+                }
               : undefined
         if (outcome && supportsLifecycleSettlement && !lifecycle) {
           throw new OrchestrationError(

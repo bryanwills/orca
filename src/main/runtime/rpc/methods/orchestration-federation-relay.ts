@@ -101,12 +101,16 @@ export const ORCHESTRATION_FEDERATION_RELAY_METHODS: RpcMethod[] = [
         dispatchId: params.dispatchId,
         direction: 'to_home',
         throughSequence: params.throughSequence,
-        ...(terminalSettlements.length === 0
+        ...(settlements.length === 0
           ? {}
           : {
-              settleRemoteReports: terminalSettlements.map((settlement) => ({
+              settleRemoteReports: settlements.map((settlement) => ({
                 sequence: settlement.sequence,
-                outcome: settlement.lifecycle.action === 'completed' ? 'succeeded' : 'failed'
+                ...(settlement.lifecycle.action === 'completed'
+                  ? { outcome: 'succeeded' as const }
+                  : settlement.lifecycle.action === 'failed'
+                    ? { outcome: 'failed' as const }
+                    : {})
               }))
             })
       })

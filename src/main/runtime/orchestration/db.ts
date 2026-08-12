@@ -53,7 +53,10 @@ import {
   type WorkerTerminalRetainedReason
 } from './worker-terminal-ownership'
 import { ORCHESTRATION_RUN_PAGE_LIMIT } from '../../../shared/orchestration-run-pagination'
-import { ORCHESTRATION_CONTRACT_VERSION } from '../../../shared/protocol-version'
+import {
+  ORCHESTRATION_CONTRACT_VERSION,
+  ORCHESTRATION_FEDERATION_LIFECYCLE_SETTLEMENT_PROTOCOL_VERSION
+} from '../../../shared/protocol-version'
 import {
   releaseContextOnlyDispatch,
   type ContextOnlyDispatchReleaseResult
@@ -5162,22 +5165,23 @@ export class OrchestrationDb {
     dispatchId: string
     direction: FederationRelayDirection
     throughSequence: number
-    settleRemoteReports?: { sequence: number; outcome: WorkerReportOutcome }[]
+    settleRemoteReports?: { sequence: number; outcome?: WorkerReportOutcome }[]
   }): void {
     this.db.exec('BEGIN IMMEDIATE')
     try {
-      const terminalReports = params.settleRemoteReports ?? []
-      for (const terminalReport of terminalReports) {
+      const settledReports = params.settleRemoteReports ?? []
+      for (const settledReport of settledReports) {
         const report = this.getFederationRelayItem(
           params.dispatchId,
           params.direction,
-          terminalReport.sequence
+          settledReport.sequence
         )
         if (
           params.direction !== 'to_home' ||
-          terminalReport.sequence > params.throughSequence ||
+          settledReport.sequence > params.throughSequence ||
           report?.kind !== 'worker_done' ||
-          parseFederatedWorkerReportOutcome(report.payload) !== terminalReport.outcome
+          (settledReport.outcome !== undefined &&
+            parseFederatedWorkerReportOutcome(report.payload) !== settledReport.outcome)
         ) {
           throw new OrchestrationError(
             'request_mismatch',
@@ -5185,14 +5189,38 @@ export class OrchestrationDb {
           )
         }
       }
-      const terminalOutcomes = new Set(terminalReports.map((report) => report.outcome))
+      const attachment = this.getRemoteDispatchAttachment(params.dispatchId)
+      if (
+        params.direction === 'to_home' &&
+        attachment !== undefined &&
+        attachment.protocol_version >=
+          ORCHESTRATION_FEDERATION_LIFECYCLE_SETTLEMENT_PROTOCOL_VERSION
+      ) {
+        const acknowledgedReports = this.db
+          .prepare(
+            `SELECT sequence FROM federation_relay_items
+             WHERE dispatch_id = ? AND direction = 'to_home' AND kind = 'worker_done'
+               AND acked_at IS NULL AND sequence <= ?`
+          )
+          .all(params.dispatchId, params.throughSequence) as { sequence: number }[]
+        const settledSequences = new Set(settledReports.map((report) => report.sequence))
+        if (acknowledgedReports.some((report) => !settledSequences.has(report.sequence))) {
+          throw new OrchestrationError(
+            'request_mismatch',
+            `Federation acknowledgment for ${params.dispatchId} omits a worker_done settlement.`
+          )
+        }
+      }
+      const terminalOutcomes = new Set(
+        settledReports.flatMap((report) => (report.outcome ? [report.outcome] : []))
+      )
       if (terminalOutcomes.size > 1) {
         throw new OrchestrationError(
           'request_mismatch',
           `Federation acknowledgment for ${params.dispatchId} contains conflicting settlements.`
         )
       }
-      const terminalOutcome = terminalReports[0]?.outcome
+      const terminalOutcome = settledReports.find((report) => report.outcome)?.outcome
       if (terminalOutcome) {
         this.settleRemoteAttachmentInRelayTransaction(
           params.dispatchId,
