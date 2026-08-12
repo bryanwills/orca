@@ -2698,7 +2698,7 @@ export class OrcaRuntimeService {
   private managedHookReconciliationGeneration = 0
   private managedHookReconciliationTail: Promise<void> = Promise.resolve()
   private readonly orchestrationEnvironmentTransport: OrchestrationEnvironmentTransport | null
-  private readonly orchestrationFederationTimers = new Map<string, ReturnType<typeof setInterval>>()
+  private readonly orchestrationFederationTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private readonly orchestrationFederationSyncs = new Map<
     string,
     { db: OrchestrationDb; promise: Promise<void> }
@@ -4716,29 +4716,40 @@ export class OrcaRuntimeService {
       if (this.orchestrationFederationTimers.has(dispatch.dispatch_id)) {
         continue
       }
-      const tick = () => {
-        const worker = this.getOrchestrationDb().getWorkerDispatch(dispatch.dispatch_id)
-        if (!worker || !['starting', 'ready', 'stopping'].includes(worker.state)) {
-          const activeTimer = this.orchestrationFederationTimers.get(dispatch.dispatch_id)
-          if (activeTimer) {
-            clearInterval(activeTimer)
-          }
+      let retryDelayMs = 1_000
+      const tick = async () => {
+        const currentTimer = this.orchestrationFederationTimers.get(dispatch.dispatch_id)
+        if (!this.getOrchestrationDb().isFederatedDispatchRelayEligible(dispatch.dispatch_id)) {
           this.orchestrationFederationTimers.delete(dispatch.dispatch_id)
           this.orchestrationFederationWarnings.delete(dispatch.dispatch_id)
           return
         }
-        void this.syncOrchestrationFederatedDispatch(dispatch.dispatch_id).catch(() => undefined)
+        try {
+          await this.syncOrchestrationFederatedDispatch(dispatch.dispatch_id)
+          retryDelayMs = 1_000
+        } catch {
+          retryDelayMs = Math.min(retryDelayMs * 2, 30_000)
+        }
+        if (this.orchestrationFederationTimers.get(dispatch.dispatch_id) !== currentTimer) {
+          return
+        }
+        if (!this.getOrchestrationDb().isFederatedDispatchRelayEligible(dispatch.dispatch_id)) {
+          this.orchestrationFederationTimers.delete(dispatch.dispatch_id)
+          return
+        }
+        const timer = setTimeout(tick, retryDelayMs)
+        timer.unref?.()
+        this.orchestrationFederationTimers.set(dispatch.dispatch_id, timer)
       }
-      const timer = setInterval(tick, 1_000)
+      const timer = setTimeout(tick, 0)
       timer.unref?.()
       this.orchestrationFederationTimers.set(dispatch.dispatch_id, timer)
-      tick()
     }
   }
 
   stopOrchestrationFederationRelay(): void {
     for (const timer of this.orchestrationFederationTimers.values()) {
-      clearInterval(timer)
+      clearTimeout(timer)
     }
     this.orchestrationFederationTimers.clear()
     this.orchestrationFederationWarnings.clear()

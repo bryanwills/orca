@@ -15,7 +15,6 @@ const POST_V6_COLUMNS = [
   ['question_threads', 'run_id'],
   ['worker_dispatches', 'runtime_epoch'],
   ['federated_dispatches', 'to_home_imported_sequence'],
-  ['federated_dispatches', 'to_home_acknowledged_sequence'],
   ['remote_dispatch_attachments', 'to_worker_imported_sequence'],
   ['remote_dispatch_attachments', 'protocol_version'],
   ['federation_relay_items', 'dispatch_id'],
@@ -24,6 +23,10 @@ const POST_V6_COLUMNS = [
   ['legacy_compatibility_principals', 'id'],
   ['legacy_operation_receipts', 'principal_id'],
   ['legacy_mail_receipts', 'principal_id']
+] as const
+
+const VERSIONED_POST_V6_COLUMNS = [
+  { version: 27, table: 'federated_dispatches', column: 'to_home_acknowledged_sequence' }
 ] as const
 
 const POST_V6_INDEXES = [
@@ -83,9 +86,13 @@ function hasConsistentLegacyAdoption(db: Database.Database): boolean {
   return true
 }
 
-function hasCompletePostV6Schema(db: Database.Database): boolean {
+function hasCompletePostV6Schema(db: Database.Database, storedVersion: number): boolean {
   return (
     POST_V6_COLUMNS.every(([table, column]) => hasOrchestrationColumn(db, table, column)) &&
+    VERSIONED_POST_V6_COLUMNS.every(
+      ({ version, table, column }) =>
+        storedVersion < version || hasOrchestrationColumn(db, table, column)
+    ) &&
     POST_V6_INDEXES.every((index) => hasOrchestrationIndex(db, index)) &&
     messagesAllowQuestions(db) &&
     hasConsistentLegacyAdoption(db)
@@ -100,7 +107,7 @@ export function resolveOrchestrationMigrationStartVersion(
   if (storedVersion > schemaVersion) {
     return storedVersion
   }
-  if (hasCompletePostV6Schema(db)) {
+  if (hasCompletePostV6Schema(db, storedVersion)) {
     return storedVersion
   }
   // Why: version-skewed pre-Run databases can claim the post-v6 range while retaining v6 tables.

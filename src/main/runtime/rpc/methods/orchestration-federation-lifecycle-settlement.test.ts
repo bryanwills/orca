@@ -143,6 +143,14 @@ describe('orchestration federation lifecycle settlement', () => {
     homeRuntime.setOrchestrationDb(homeDb)
   }
 
+  function restartWorkerRuntime(): void {
+    workerRuntime.stopOrchestrationFederationRelay()
+    workerRuntime = new OrcaRuntimeService()
+    workerRuntime.setOrchestrationDb(workerDb)
+    workerDispatcher = new RpcDispatcher({ runtime: workerRuntime, methods: ORCHESTRATION_METHODS })
+    configureWorkerRuntime()
+  }
+
   async function sendRemoteCompletion(taskId: string, reportedTaskId: string, sync = true) {
     await homeDispatcher.dispatch(startRequest(taskId))
     homeRuntime.stopOrchestrationFederationRelay()
@@ -382,6 +390,59 @@ describe('orchestration federation lifecycle settlement', () => {
     }
   )
 
+  it.each([1, 2] as const)(
+    'completes a persisted protocol v%s worker after its worker server updates',
+    async (protocolVersion) => {
+      const dispatchId = `ctx_persisted_protocol_${protocolVersion}`
+      const taskId = `task_persisted_protocol_${protocolVersion}`
+      workerDb.createRemoteDispatchAttachment({
+        dispatchId,
+        taskId,
+        homePeerFingerprint: 'run-home-device-token',
+        protocolVersion,
+        runtimeEpoch: workerRuntime.getRuntimeId(),
+        mutationReceipt: {
+          callerFingerprint: 'run-home-device-token',
+          requestId: `persisted_protocol_${protocolVersion}_attach`,
+          method: 'orchestration.federationAttachStart',
+          payloadHash: `persisted_protocol_${protocolVersion}_payload`
+        }
+      })
+      const capability = workerDb.prepareRemoteAttachmentAuthority({
+        dispatchId,
+        paneKey: 'tab_worker:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+        processIncarnation: 'windows_runtime:pty:1',
+        worktreeId: 'repo::persisted-worker',
+        terminalHandle: 'term_windows_worker',
+        setupState: 'completed',
+        effects: []
+      })
+      workerDb.markRemoteAttachmentReady(dispatchId)
+      restartWorkerRuntime()
+
+      const completion = (await workerDispatcher.dispatch({
+        id: `rpc_persisted_protocol_${protocolVersion}_completion`,
+        authToken: 'worker-local-token',
+        orchestrationContractVersion: ORCHESTRATION_CONTRACT_VERSION,
+        orchestrationRequestId: `persisted_protocol_${protocolVersion}_completion_request`,
+        orchestrationCapability: capability,
+        method: 'orchestration.send',
+        params: {
+          from: 'term_windows_worker',
+          subject: 'Done after update',
+          type: 'worker_done',
+          payload: JSON.stringify({ taskId, dispatchId, outcome: 'succeeded' })
+        }
+      })) as RuntimeRpcResponse<unknown>
+
+      expect({
+        completion: lifecycleResult(completion),
+        attachment: workerDb.getRemoteDispatchAttachment(dispatchId)?.state,
+        pending: workerDb.listPendingFederationRelay(dispatchId, 'to_home').length
+      }).toEqual({ completion: 'completed', attachment: 'succeeded', pending: 1 })
+    }
+  )
+
   it('does not settle an attachment from a verdict for non-lifecycle mail', async () => {
     const task = createHomeTask()
     await homeDispatcher.dispatch(startRequest(task.id))
@@ -615,7 +676,8 @@ describe('orchestration federation lifecycle settlement', () => {
     )
     failNextAckBeforeDelivery = true
 
-    await homeRuntime.syncOrchestrationFederation()
+    homeRuntime.ensureOrchestrationFederationRelay()
+    await vi.waitFor(() => expect(ackAttempts).toBe(1))
     const acknowledgedAfterLoss =
       (
         homeDb.getFederatedDispatch(dispatch.id) as unknown as {
@@ -623,7 +685,10 @@ describe('orchestration federation lifecycle settlement', () => {
         }
       ).to_home_acknowledged_sequence ?? 0
     restartHomeRuntime()
-    await homeRuntime.syncOrchestrationFederation()
+    homeRuntime.ensureOrchestrationFederationRelay()
+    await vi.waitFor(() =>
+      expect(workerDb.getRemoteDispatchAttachment(dispatch.id)?.state).toBe('succeeded')
+    )
     const acknowledgedAfterRetry =
       (
         homeDb.getFederatedDispatch(dispatch.id) as unknown as {
@@ -631,6 +696,7 @@ describe('orchestration federation lifecycle settlement', () => {
         }
       ).to_home_acknowledged_sequence ?? 0
     restartHomeRuntime()
+    homeRuntime.ensureOrchestrationFederationRelay()
     await homeRuntime.syncOrchestrationFederation()
 
     const observed = {

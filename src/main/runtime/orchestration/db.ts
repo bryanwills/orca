@@ -4576,6 +4576,26 @@ export class OrchestrationDb {
       .all(runId ?? null, runId ?? null) as FederatedDispatchRow[]
   }
 
+  isFederatedDispatchRelayEligible(dispatchId: string): boolean {
+    return Boolean(
+      this.db
+        .prepare(
+          `SELECT 1
+           FROM federated_dispatches fd
+           INNER JOIN worker_dispatches wd ON wd.dispatch_id = fd.dispatch_id
+           WHERE fd.dispatch_id = ?
+             AND (
+               wd.state IN ('starting', 'ready', 'stopping', 'start_unknown', 'stop_unknown')
+               OR (
+                 fd.protocol_version >= 3
+                 AND fd.to_home_acknowledged_sequence < fd.to_home_imported_sequence
+               )
+             )`
+        )
+        .get(dispatchId)
+    )
+  }
+
   updateFederatedDispatchResources(params: {
     dispatchId: string
     remoteRuntimeEpoch: string
@@ -5002,6 +5022,10 @@ export class OrchestrationDb {
           | FederationRelayItemRow
           | undefined
         if (identicalReport) {
+          this.settleRemoteAttachmentInRelayTransaction(
+            params.dispatchId,
+            params.settleRemoteOutcome
+          )
           this.db.exec('COMMIT')
           return identicalReport
         }
