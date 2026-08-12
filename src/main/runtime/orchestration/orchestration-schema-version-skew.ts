@@ -15,6 +15,7 @@ const POST_V6_COLUMNS = [
   ['question_threads', 'run_id'],
   ['worker_dispatches', 'runtime_epoch'],
   ['federated_dispatches', 'to_home_imported_sequence'],
+  ['federated_dispatches', 'to_home_acknowledged_sequence'],
   ['remote_dispatch_attachments', 'to_worker_imported_sequence'],
   ['remote_dispatch_attachments', 'protocol_version'],
   ['federation_relay_items', 'dispatch_id'],

@@ -127,8 +127,14 @@ export async function syncFederatedDispatch(
     peerFingerprint: federated.peer_fingerprint,
     remoteRuntimeEpoch: pulled.runtimeEpoch
   }
-  if (cursor > getFederationAckedThrough(ackLease, ackIdentity)) {
-    await runtime.callOrchestrationWorkerServer(
+  const durableAcknowledgedThrough =
+    federated.remote_runtime_epoch === pulled.runtimeEpoch
+      ? (federated.to_home_acknowledged_sequence ?? 0)
+      : 0
+  if (
+    cursor > Math.max(getFederationAckedThrough(ackLease, ackIdentity), durableAcknowledgedThrough)
+  ) {
+    const delivered = (await runtime.callOrchestrationWorkerServer(
       federated.environment_id,
       'orchestration.federationAck',
       {
@@ -138,10 +144,15 @@ export async function syncFederatedDispatch(
       },
       15_000,
       { orchestrationRequestId: `relay_ack_${dispatchId}_${cursor}` }
-    )
+    )) as { acknowledgedThrough: number }
+    db.recordFederatedHomeAcknowledgment({
+      dispatchId,
+      remoteRuntimeEpoch: pulled.runtimeEpoch,
+      sequence: delivered.acknowledgedThrough
+    })
     recordFederationAckCheckpoint(runtime, ackLease, {
       ...ackIdentity,
-      throughSequence: cursor
+      throughSequence: delivered.acknowledgedThrough
     })
   }
   const toWorker =

@@ -88,25 +88,26 @@ export const ORCHESTRATION_FEDERATION_RELAY_METHODS: RpcMethod[] = [
         (settlement) =>
           settlement.lifecycle.action === 'completed' || settlement.lifecycle.action === 'failed'
       )
-      if (terminalSettlements.length > 1) {
+      const terminalOutcomes = new Set(
+        terminalSettlements.map((settlement) => settlement.lifecycle.action)
+      )
+      if (terminalOutcomes.size > 1) {
         throw new OrchestrationError(
           'request_mismatch',
           `Federation acknowledgment for ${params.dispatchId} contains conflicting settlements.`
         )
       }
-      const terminalSettlement = terminalSettlements[0]
       runtime.getOrchestrationDb().acknowledgeFederationRelay({
         dispatchId: params.dispatchId,
         direction: 'to_home',
         throughSequence: params.throughSequence,
-        ...(!terminalSettlement
+        ...(terminalSettlements.length === 0
           ? {}
           : {
-              settleRemoteReport: {
-                sequence: terminalSettlement.sequence,
-                outcome:
-                  terminalSettlement.lifecycle.action === 'completed' ? 'succeeded' : 'failed'
-              }
+              settleRemoteReports: terminalSettlements.map((settlement) => ({
+                sequence: settlement.sequence,
+                outcome: settlement.lifecycle.action === 'completed' ? 'succeeded' : 'failed'
+              }))
             })
       })
       for (const settlement of settlements) {

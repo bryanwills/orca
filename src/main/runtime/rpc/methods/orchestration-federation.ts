@@ -1,4 +1,5 @@
 import type { TuiAgent } from '../../../../shared/types'
+import { ORCHESTRATION_FEDERATION_LIFECYCLE_SETTLEMENT_PROTOCOL_VERSION } from '../../../../shared/protocol-version'
 import { buildDispatchPreamble } from '../../orchestration/preamble'
 import { OrchestrationError } from '../../orchestration/orchestration-error'
 import { defineMethod, type RpcMethod } from '../core'
@@ -28,6 +29,12 @@ export const ORCHESTRATION_FEDERATION_ATTACH_METHODS: RpcMethod[] = [
         throw new OrchestrationError(
           'invalid_argument',
           'Federated worker attachment requires a durable retry request.'
+        )
+      }
+      if (params.protocolVersion < ORCHESTRATION_FEDERATION_LIFECYCLE_SETTLEMENT_PROTOCOL_VERSION) {
+        throw new OrchestrationError(
+          'capability_unsupported',
+          'This worker server requires federation lifecycle settlement support. No effects were applied.'
         )
       }
       if (params.worktree === 'current' || params.worktree === 'new-child') {
