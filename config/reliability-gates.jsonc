@@ -8005,6 +8005,51 @@
           "date": "2026-08-12",
           "runner": "local",
           "platform": "macos",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/rpc/methods/orchestration-federation-lifecycle-settlement.test.ts --reporter=dot",
+          "result": "failed",
+          "durationSeconds": 5.05,
+          "summary": "The byte-identical ac7bdf4e federation oracle failed 7 of 17 tests on affected 09ec516ae5: fresh v1/v2 work started before completion rejection, persisted v1/v2 work could not finish after update, same-outcome ACKs rejected, duplicate reports remained pending, and a dropped ACK was not replayed by the production scheduler."
+        },
+        {
+          "date": "2026-08-12",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/rpc/methods/orchestration-federation-lifecycle-settlement.test.ts --reporter=dot",
+          "result": "failed",
+          "durationSeconds": 5.86,
+          "summary": "The same byte-identical oracle failed the same 7 of 17 tests on latest main 1136503c6a."
+        },
+        {
+          "date": "2026-08-12",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/rpc/methods/orchestration-federation-lifecycle-settlement.test.ts --reporter=dot",
+          "result": "passed",
+          "durationSeconds": 4.28,
+          "summary": "The same byte-identical oracle passed all 17 tests on candidate 008f740161, including production-scheduler restart replay and both directions of v1/v2 update compatibility."
+        },
+        {
+          "date": "2026-08-12",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/rpc/methods/orchestration-federation-lifecycle-settlement.test.ts --reporter=dot",
+          "result": "failed",
+          "durationSeconds": 19.84,
+          "summary": "With the claimed production files restored to latest main in 3a15d3ed5d, the same byte-identical oracle returned to the same 7 failures while 10 unaffected cases still passed."
+        },
+        {
+          "date": "2026-08-12",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/orchestration/federation-acknowledgment-migration.test.ts --reporter=dot",
+          "result": "passed",
+          "durationSeconds": 0.47,
+          "summary": "A complete v26 database resolved migration start at v26, upgraded to v27, retained its imported cursor, and initialized the durable acknowledgment watermark to zero."
+        },
+        {
+          "date": "2026-08-12",
+          "runner": "local",
+          "platform": "macos",
           "command": "pnpm run build:cli && SKIP_BUILD=1 pnpm exec playwright test tests/e2e/orchestration-worker-settlement-release-cli.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1",
           "result": "passed",
           "durationSeconds": 20,
@@ -8111,7 +8156,7 @@
       },
       "redGreenEvidence": {
         "status": "complete",
-        "evidence": "The byte-identical 628721d7 federation oracle failed 5 of 15 tests on affected 09ec516ae5 and latest main 1136503c6a, passed 15 of 15 on candidate 2c4a0577c8, and returned to the same 5 failures when that production fix alone was reverted in a635877231. It independently proves dropped-ACK replay across Run-home restarts, identical and preexisting same-outcome retry convergence, conflicting-outcome refusal, current-worker v1/v2 pre-effect rejection, and legacy-worker v1/v2 completion. The compiled-CLI Electron oracle separately failed on main 5ea7df1a5b, passed on candidate d697666ce8, and reproduced its original failure with the claimed production files disabled. Distinct installed A/B and CI artifacts are still needed."
+        "evidence": "The byte-identical ac7bdf4e federation oracle failed 7 of 17 tests on affected 09ec516ae5 and latest main 1136503c6a, passed 17 of 17 on candidate 008f740161, and returned to the same 7 failures when the claimed production files were restored to latest main in 3a15d3ed5d. It independently proves production-scheduler dropped-ACK replay across Run-home restarts, identical and preexisting same-outcome retry convergence, conflicting-outcome refusal, current-worker v1/v2 pre-effect rejection, new-home/legacy-worker v1/v2 completion, and persisted legacy-worker completion after a server update. The compiled-CLI Electron oracle separately failed on main 5ea7df1a5b, passed on candidate d697666ce8, and reproduced its original failure with the claimed production files disabled. Distinct installed A/B and CI artifacts are still needed."
       },
       "performanceBudget": {
         "required": true,
