@@ -17,14 +17,23 @@ function createIdleSyncHarness() {
     environment_id: 'environment_windows',
     environment_name: 'windows',
     peer_fingerprint: 'windows_peer_fingerprint',
-    to_home_imported_sequence: 2
+    remote_runtime_epoch: remoteRuntimeEpoch,
+    to_home_imported_sequence: 2,
+    to_home_acknowledged_sequence: 0
   }
   const createDb = () =>
     ({
       getFederatedDispatch: () => federated,
       getDispatchContextById: () => ({ run_id: 'run_home', task_id: 'task_home' }),
       getWorkerDispatch: () => ({ state: 'ready' }),
-      listPendingFederationRelay: () => []
+      listPendingFederationRelay: () => [],
+      recordFederatedHomeAcknowledgment: (params: {
+        remoteRuntimeEpoch: string
+        sequence: number
+      }) => {
+        federated.remote_runtime_epoch = params.remoteRuntimeEpoch
+        federated.to_home_acknowledged_sequence = params.sequence
+      }
     }) as never
   const runtime = new OrcaRuntimeService()
   runtime.setOrchestrationDb(createDb())

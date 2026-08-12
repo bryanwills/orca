@@ -296,35 +296,22 @@ describe('orchestration federation', () => {
     expect(workerRuntime.sendTerminalAgentPrompt).not.toHaveBeenCalled()
   })
 
-  it('rejects control mail before queueing when the worker lacks that capability', async () => {
+  it('rejects a legacy federation worker before launch effects', async () => {
     workerCapabilities = workerCapabilities.filter(
       (capability) => capability !== ORCHESTRATION_FEDERATION_CONTROL_MAIL_RUNTIME_CAPABILITY
     )
     const task = createHomeTask()
     const started = await homeDispatcher.dispatch(startRequest(task.id))
-    expect(started).toMatchObject({ ok: true, result: { state: 'ready' } })
+    expect(started).toMatchObject({
+      ok: true,
+      result: { state: 'failed', failedStage: 'remote_attach' }
+    })
     const dispatch = homeDb.getDispatchContext(task.id)!
 
-    const sent = await homeDispatcher.dispatch({
-      id: 'send-control-to-old-worker',
-      authToken: 'coordinator-token',
-      orchestrationContractVersion: ORCHESTRATION_CONTRACT_VERSION,
-      orchestrationRequestId: 'send-control-to-old-worker-request',
-      method: 'orchestration.send',
-      params: {
-        from: 'term_coord',
-        to: `dispatch:${dispatch.id}`,
-        subject: 'Continue',
-        body: 'This worker cannot receive control mail yet.',
-        type: 'status'
-      }
-    })
-
-    expect(sent).toMatchObject({
-      ok: false,
-      error: { code: 'capability_unsupported' }
-    })
+    expect(workerDb.getRemoteDispatchAttachment(dispatch.id)).toBeUndefined()
     expect(homeDb.listPendingFederationRelay(dispatch.id, 'to_worker')).toHaveLength(0)
+    expect(workerRuntime.createManagedWorktree).not.toHaveBeenCalled()
+    expect(workerRuntime.sendTerminalAgentPrompt).not.toHaveBeenCalled()
   })
 
   it('durably relays remote completion into the home Run and acknowledges it', async () => {
