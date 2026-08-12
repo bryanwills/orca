@@ -84,6 +84,13 @@ export const ORCHESTRATION_FEDERATION_RELAY_METHODS: RpcMethod[] = [
       const settlements = (params.settlements ?? []).filter(
         (settlement) => settlement.sequence <= params.throughSequence
       )
+      const settlementSequences = new Set(settlements.map((settlement) => settlement.sequence))
+      if (settlementSequences.size !== settlements.length) {
+        throw new OrchestrationError(
+          'request_mismatch',
+          `Federation acknowledgment for ${params.dispatchId} contains duplicate settlement sequences.`
+        )
+      }
       const terminalSettlements = settlements.filter(
         (settlement) =>
           settlement.lifecycle.action === 'completed' || settlement.lifecycle.action === 'failed'
