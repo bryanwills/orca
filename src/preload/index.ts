@@ -4427,6 +4427,7 @@ const api = {
       params?: unknown
       timeoutMs?: number
       expectedEnvironmentPairingRevision?: number
+      expectedRuntimeId?: string
     }): Promise<RuntimeRpcResponse<unknown>> =>
       ipcRenderer.invoke('runtimeEnvironments:call', args),
     subscribe: async (
@@ -4436,6 +4437,7 @@ const api = {
         params?: unknown
         timeoutMs?: number
         expectedEnvironmentPairingRevision?: number
+        expectedRuntimeId?: string
       },
       callbacks: {
         onResponse: (response: RuntimeRpcResponse<unknown>) => void
