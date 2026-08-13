@@ -296,7 +296,7 @@ describe('orchestration federation', () => {
     expect(workerRuntime.sendTerminalAgentPrompt).not.toHaveBeenCalled()
   })
 
-  it('rejects a legacy federation worker before launch effects', async () => {
+  it('starts a legacy federation worker through its negotiated protocol', async () => {
     workerCapabilities = workerCapabilities.filter(
       (capability) => capability !== ORCHESTRATION_FEDERATION_CONTROL_MAIL_RUNTIME_CAPABILITY
     )
@@ -304,14 +304,17 @@ describe('orchestration federation', () => {
     const started = await homeDispatcher.dispatch(startRequest(task.id))
     expect(started).toMatchObject({
       ok: true,
-      result: { state: 'failed', failedStage: 'remote_attach' }
+      result: { state: 'ready' }
     })
     const dispatch = homeDb.getDispatchContext(task.id)!
 
-    expect(workerDb.getRemoteDispatchAttachment(dispatch.id)).toBeUndefined()
+    expect(workerDb.getRemoteDispatchAttachment(dispatch.id)).toMatchObject({
+      state: 'ready',
+      protocol_version: 1
+    })
     expect(homeDb.listPendingFederationRelay(dispatch.id, 'to_worker')).toHaveLength(0)
-    expect(workerRuntime.createManagedWorktree).not.toHaveBeenCalled()
-    expect(workerRuntime.sendTerminalAgentPrompt).not.toHaveBeenCalled()
+    expect(workerRuntime.createManagedWorktree).toHaveBeenCalledOnce()
+    expect(workerRuntime.sendTerminalAgentPrompt).toHaveBeenCalledOnce()
   })
 
   it('durably relays remote completion into the home Run and acknowledges it', async () => {
