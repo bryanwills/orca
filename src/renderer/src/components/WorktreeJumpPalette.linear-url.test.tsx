@@ -12,7 +12,7 @@ import { projectHostSetupProjectionFromRepos } from '../../../shared/project-hos
 import { resolveWorkspaceCreationTarget } from '@/lib/project-host-workspace-target'
 import { WORKTREE_PALETTE_QUERY_MAX_BYTES } from '@/lib/worktree-palette-query-bounds'
 import WorktreeJumpPalette from './WorktreeJumpPalette'
-import { makeRecentTabState, makeRepo } from './worktree-jump-palette-test-fixtures'
+import { makeRecentTabState, makeRepo, makeWorktree } from './worktree-jump-palette-test-fixtures'
 
 vi.mock('react-i18next', async (importOriginal) => {
   const actual = await importOriginal<typeof ReactI18Next>()
@@ -608,5 +608,96 @@ describe('WorktreeJumpPalette Linear URL intent', () => {
     expect(testContainer.textContent).toContain('Current second issue')
     expect(testContainer.textContent).not.toContain('Stale first issue')
     expect(getCommandValue()).toBe('__create_worktree__')
+  })
+
+  it('selects an existing Linear-linked worktree and keeps create underneath', async () => {
+    const linked = makeWorktree('wt-linked', 'Linked Linear workspace', {
+      linkedLinearIssue: 'STA-4084',
+      linkedLinearIssueOrganizationUrlKey: 'stably'
+    })
+    const other = makeWorktree('wt-other', 'Unrelated workspace')
+    await renderPalette({
+      fetchLinearIssue: vi.fn(async () => makeLinearIssue()),
+      worktreesByRepo: { 'repo-1': [other, linked] }
+    })
+
+    await act(async () => setCommandQuery?.(LINEAR_URL))
+    await flushEffects()
+
+    expect(getRenderedRowIds().filter(Boolean)).toEqual([
+      'worktree:wt-linked',
+      '__create_worktree__'
+    ])
+    expect(getCommandValue()).toBe('worktree:wt-linked')
+    expect(testContainer.querySelector('[data-cmd-j-linear-issue-preview="true"]')).not.toBeNull()
+  })
+
+  it('previews a pasted GitHub issue URL without resolving it', async () => {
+    const githubIssueUrl = 'https://github.com/stablyai/orca/issues/14198'
+    await renderPalette({
+      prefetchWorktreeCreateBase: vi.fn(async () => {})
+    })
+
+    await act(async () => setCommandQuery?.(githubIssueUrl))
+    await flushEffects()
+
+    const preview = testContainer.querySelector<HTMLElement>('[data-cmd-j-task-url-preview="true"]')
+    expect(getRenderedRowIds().find(Boolean)).toBe('__create_worktree__')
+    expect(getCommandValue()).toBe('__create_worktree__')
+    expect(preview?.dataset.cmdJTaskUrlProvider).toBe('github')
+    expect(preview?.getAttribute('aria-label')).toBe(
+      'Create worktree from GitHub issue stablyai/orca#14198'
+    )
+    expect(preview?.textContent).toContain('#14198')
+    expect(preview?.textContent).toContain('stablyai/orca')
+
+    await act(async () => {
+      preview?.click()
+      await Promise.resolve()
+    })
+    await flushEffects()
+
+    expect(useAppStore.getState().activeModal).toBe('new-workspace-composer')
+    expect(useAppStore.getState().modalData).toMatchObject({
+      prefilledName: githubIssueUrl,
+      initialRepoId: 'repo-1',
+      telemetrySource: 'command_palette'
+    })
+    expect(useAppStore.getState().modalData).not.toHaveProperty('linkedWorkItem')
+  })
+
+  it('previews a pasted GitHub pull URL', async () => {
+    await renderPalette({})
+    await act(async () => setCommandQuery?.('https://github.com/stablyai/orca/pull/12789'))
+    await flushEffects()
+
+    const preview = testContainer.querySelector<HTMLElement>('[data-cmd-j-task-url-preview="true"]')
+    expect(preview?.dataset.cmdJTaskUrlProvider).toBe('github')
+    expect(preview?.getAttribute('aria-label')).toBe(
+      'Create worktree from GitHub pull request stablyai/orca#12789'
+    )
+    expect(preview?.textContent).toContain('#12789')
+  })
+
+  it('selects an existing GitHub-linked worktree and keeps create underneath', async () => {
+    const linked = makeWorktree('wt-linked', 'Linked GitHub workspace', { linkedIssue: 14198 })
+    const other = makeWorktree('wt-other', 'Unrelated workspace', { linkedIssue: 7 })
+    await renderPalette({
+      repos: [{ ...makeRepo(), displayName: 'stablyai/orca' }],
+      worktreesByRepo: { 'repo-1': [other, linked] }
+    })
+
+    await act(async () => setCommandQuery?.('https://github.com/stablyai/orca/issues/14198'))
+    await flushEffects()
+
+    expect(getRenderedRowIds().filter(Boolean)).toEqual([
+      'worktree:wt-linked',
+      '__create_worktree__'
+    ])
+    expect(getCommandValue()).toBe('worktree:wt-linked')
+    expect(
+      testContainer.querySelector('[data-cmd-j-task-url-preview="true"]')?.dataset
+        .cmdJTaskUrlProvider
+    ).toBe('github')
   })
 })

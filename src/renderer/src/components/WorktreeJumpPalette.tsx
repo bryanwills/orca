@@ -187,8 +187,10 @@ import { resolveWorkspaceCreationTarget } from '@/lib/project-host-workspace-tar
 import { lookupGitHubWorkItemForSource } from '@/lib/github-work-item-source-lookup'
 import { buildLinearIssueLinkedWorkItem } from '@/lib/linear-linked-work-item'
 import { lookupLinearIssueUrl } from '@/lib/linear-issue-url-lookup'
-import { isWorktreePaletteQueryTooLarge } from '@/lib/worktree-palette-query-bounds'
-import { parseLinearIssueUrlIntent } from '../../../shared/linear-links'
+import {
+  getCmdJTaskUrlCreatePreview,
+  parseCmdJTaskSourceUrl
+} from '@/lib/worktree-palette-task-url-match'
 import type { SettingsNavTarget } from '@/lib/settings-navigation-types'
 import { getHostDisplayLabelOverrides } from '../../../shared/host-setting-overrides'
 import {
@@ -674,6 +676,12 @@ function WorktreeJumpPaletteContent({
   const deferredQuery = useDeferredValue(query)
   const liveQueryRef = useRef(query)
   liveQueryRef.current = query
+  const taskSourceUrl = useMemo(() => parseCmdJTaskSourceUrl(query), [query])
+  const linearIssueUrlIntent = taskSourceUrl?.provider === 'linear' ? taskSourceUrl.intent : null
+  const taskUrlCreatePreview = useMemo(
+    () => (taskSourceUrl ? getCmdJTaskUrlCreatePreview(taskSourceUrl) : null),
+    [taskSourceUrl]
+  )
   const [selectedItemId, setSelectedItemId] = useState('')
   const [linearIssuePreview, setLinearIssuePreview] = useState<CmdJLinearIssuePreview | null>(null)
   const linearIssueLookupGenerationRef = useRef(0)
@@ -784,7 +792,8 @@ function WorktreeJumpPaletteContent({
     [defaultHostId, projectGroups]
   )
 
-  const hasQuery = deferredQuery.trim().length > 0
+  const paletteSearchQuery = taskSourceUrl ? query.trim() : deferredQuery.trim()
+  const hasQuery = paletteSearchQuery.length > 0
   const isLoading = repos.length > 0 && Object.keys(worktreesByRepo).length === 0
 
   // Why: keep running-agent workspaces visible under "Hide sleeping" even when the live PTY is momentarily absent, matching sidebar. #7197
@@ -961,7 +970,7 @@ function WorktreeJumpPaletteContent({
     () =>
       searchWorktrees(
         sortedWorktrees,
-        deferredQuery.trim(),
+        paletteSearchQuery,
         repoMap,
         prCache,
         issueCache,
@@ -970,7 +979,7 @@ function WorktreeJumpPaletteContent({
       ),
     [
       sortedWorktrees,
-      deferredQuery,
+      paletteSearchQuery,
       repoMap,
       prCache,
       issueCache,
@@ -1665,13 +1674,8 @@ function WorktreeJumpPaletteContent({
       }),
     [canCreateWorktree, deferredQuery]
   )
-  const linearIssueUrlIntent = useMemo(
-    () => (isWorktreePaletteQueryTooLarge(query) ? null : parseLinearIssueUrlIntent(query)),
-    [query]
-  )
-  const createWorktreeName = linearIssueUrlIntent ? query.trim() : deferredCreateWorktreeName
-  const showCreateAction = deferredShowCreateAction || linearIssueUrlIntent !== null
-  const prioritizeLinearCreateAction = linearIssueUrlIntent !== null
+  const createWorktreeName = taskSourceUrl ? query.trim() : deferredCreateWorktreeName
+  const showCreateAction = deferredShowCreateAction || taskSourceUrl !== null
 
   // Why: arm the lookup before Enter can target the newly rendered Linear row.
   useLayoutEffect(() => {
@@ -1874,8 +1878,15 @@ function WorktreeJumpPaletteContent({
       }
     }
 
-    if (!hasQuery && showCreateAction && prioritizeLinearCreateAction) {
-      entries.push({ id: CREATE_WORKTREE_ITEM_ID, type: 'create-worktree' })
+    // Why: a pasted issue/PR URL is decisive. Show linked worktrees first so
+    // Enter jumps; keep create available underneath when the user wants a new one.
+    if (taskSourceUrl) {
+      if (visibleWorktreeItems.length > 0) {
+        pushWorktreeSection()
+      }
+      if (showCreateAction) {
+        entries.push({ id: CREATE_WORKTREE_ITEM_ID, type: 'create-worktree' })
+      }
       return entries
     }
 
@@ -1884,10 +1895,6 @@ function WorktreeJumpPaletteContent({
       pushOpenTabSection()
       pushWorktreeSection()
       return entries
-    }
-
-    if (showCreateAction && prioritizeLinearCreateAction) {
-      entries.push({ id: CREATE_WORKTREE_ITEM_ID, type: 'create-worktree' })
     }
 
     // Typed query with both open tabs and worktrees: soft-split so the trailing
@@ -1939,7 +1946,7 @@ function WorktreeJumpPaletteContent({
       // Trailing rest is already on screen; only hard-cap overflow needs a hint.
       pushOverflowHint(trailingHintId, multiPrimaryLayout.trailingHardOverflowCount)
       pushProjectAndMiddleSections()
-      if (showCreateAction && !prioritizeLinearCreateAction) {
+      if (showCreateAction) {
         entries.push({ id: CREATE_WORKTREE_ITEM_ID, type: 'create-worktree' })
       }
       return entries
@@ -1953,7 +1960,7 @@ function WorktreeJumpPaletteContent({
     if (!openTabsLeadSections) {
       pushOpenTabSection()
     }
-    if (showCreateAction && !prioritizeLinearCreateAction) {
+    if (showCreateAction) {
       // Why: creating a workspace is the fallback for "nothing here matches", so it sits below every
       // real result — never above them, where it would steal the default selection from a match.
       entries.push({ id: CREATE_WORKTREE_ITEM_ID, type: 'create-worktree' })
@@ -1963,8 +1970,8 @@ function WorktreeJumpPaletteContent({
     hasQuery,
     openTabsLeadSections,
     paletteSections,
-    prioritizeLinearCreateAction,
     showCreateAction,
+    taskSourceUrl,
     worktreeItems.length
   ])
 
@@ -2473,29 +2480,11 @@ function WorktreeJumpPaletteContent({
       return
     }
 
-    // Case 1: user pasted a GH issue/PR URL.
-    if (ghLink) {
-      const { number } = ghLink
+    // Case 1: user pasted a GH/GitLab/Jira URL.
+    // Why: hand the raw URL to the composer so it runs Cmd+N cross-project detection; pre-resolving here silently linked to the wrong project.
+    // Linked worktrees are listed above this row — selecting one jumps there.
+    if (ghLink || taskUrlCreatePreview) {
       const state = useAppStore.getState()
-
-      // Why: the existing-worktree check only needs the issue/PR number (repo-agnostic in worktree meta).
-      const matches = allWorktrees.filter(
-        (w) => !w.isArchived && (w.linkedIssue === number || w.linkedPR === number)
-      )
-      const activeMatch = matches.find((w) => w.repoId === state.activeRepoId) ?? matches[0]
-      if (activeMatch) {
-        skipRestoreFocusRef.current = true
-        closeModal()
-        // Why: #9939 — jumping to an already-open workspace must focus its own terminal.
-        const activation = activateAndRevealWorktree(activeMatch.id)
-        if (!queueWorkspaceActivationTerminalFocus(activeMatch.id, activation)) {
-          focusFallbackSurface()
-        }
-        recordFeatureInteraction('cmd-j-workspace-open')
-        return
-      }
-
-      // Why: hand the raw URL to the composer so it runs Cmd+N cross-project detection; pre-resolving here silently linked to the wrong project.
       const eligibleRepos = state.repos.filter((r) => isGitRepoKind(r))
       const repoForLookup =
         (state.activeRepoId && eligibleRepos.find((r) => r.id === state.activeRepoId)) ||
@@ -2601,6 +2590,7 @@ function WorktreeJumpPaletteContent({
     focusFallbackSurface,
     linearIssueUrlIntent,
     openModal,
+    taskUrlCreatePreview,
     prefetchCreateWorkspaceBaseForComposer,
     recordFeatureInteraction,
     repoMap
@@ -2814,6 +2804,7 @@ function WorktreeJumpPaletteContent({
                     linearIssue={linearPreviewIssue}
                     linearPending={linearPreviewLoading}
                     showLinearLoadingFeedback={showLinearLoadingFeedback}
+                    taskUrlPreview={taskUrlCreatePreview}
                     onSelect={handleCreateWorktree}
                   />
                 )

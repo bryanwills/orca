@@ -19,7 +19,7 @@ describe('WorktreeJumpPalette source-context boundaries', () => {
     // field instead of pre-resolving it against an arbitrary repo, which
     // silently linked cross-project items to the wrong project.
     const githubLinkSection = sourceBetween(
-      '// Case 1: user pasted a GH issue/PR URL.',
+      '// Case 1: user pasted a GH/GitLab/Jira URL.',
       '// Case 2: user typed a raw issue number.'
     )
     expect(githubLinkSection).toContain('prefilledName: trimmed')
