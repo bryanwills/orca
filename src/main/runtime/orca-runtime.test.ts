@@ -3873,7 +3873,10 @@ describe('OrcaRuntimeService', () => {
     expect(fsProvider.stat).toHaveBeenCalledWith(folderPath)
     expect(fsProvider.readDir).toHaveBeenCalledWith('/srv/platform/src')
     expect(fsProvider.stat).toHaveBeenCalledWith('/srv/platform/src/app.ts')
-    expect(fsProvider.readFile).toHaveBeenCalledWith('/srv/platform/src/app.ts')
+    expect(fsProvider.readFile).toHaveBeenCalledWith('/srv/platform/src/app.ts', {
+      maxBinaryBytes: 10 * 1024 * 1024,
+      maxTextBytes: 512 * 1024
+    })
   })
 
   it('lists persisted SSH worktrees while the git provider is unavailable', async () => {
