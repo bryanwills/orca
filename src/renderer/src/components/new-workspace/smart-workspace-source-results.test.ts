@@ -582,8 +582,26 @@ describe('Linear issue source input', () => {
       resultLimit: 12
     })
 
-    expect(rows.map((row) => row.kind)).toEqual(['linear'])
-    expect(rows[0]).toMatchObject({ value: 'linear-stably-issue', issue: exactIssue })
+    expect(rows.map((row) => row.kind)).toEqual(['use-name', 'linear'])
+    expect(rows[0]).toMatchObject({ kind: 'use-name', value: 'use-name', name: issueUrl })
+    expect(rows[1]).toMatchObject({ value: 'linear-stably-issue', issue: exactIssue })
+  })
+
+  it('keeps typed-text available while a Linear URL has not resolved yet', () => {
+    expect(
+      buildSmartWorkspaceSourceRows({
+        mode: 'smart',
+        value: issueUrl,
+        branches: [],
+        githubItems: [],
+        gitlabItems: [],
+        linearIssues: [],
+        gitlabAvailable: false,
+        linearAvailable: true,
+        linearUrlIntentOwnsResults: true,
+        resultLimit: 12
+      })
+    ).toEqual([{ kind: 'use-name', value: 'use-name', name: issueUrl }])
   })
 
   it('preserves arbitrary-name fallback for consumers without exact URL lookup', () => {

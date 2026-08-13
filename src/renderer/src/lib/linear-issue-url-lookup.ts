@@ -1,6 +1,6 @@
 import { linearStatus } from '@/runtime/runtime-linear-client'
 import {
-  findLinearIssueWorkspaceIdFromStatus,
+  findLinearIssueWorkspaceLookupIds,
   isLinearIssueUrlResolutionMatch,
   type LinearIssueUrlIntent
 } from '../../../shared/linear-links'
@@ -43,25 +43,36 @@ export async function lookupLinearIssueUrl({
   fetchLinearIssue: FetchLinearIssue
   readLinearStatus?: (sourceContext: TaskSourceContext | null) => Promise<LinearConnectionStatus>
 }): Promise<LinearIssue | null> {
-  const knownWorkspaceId = findLinearIssueWorkspaceIdFromStatus(intent, knownStatus)
-  if (knownWorkspaceId) {
-    const knownIssue = await fetchMatchingLinearIssue(
-      intent,
-      knownWorkspaceId,
-      sourceContext,
-      fetchLinearIssue
-    )
-    if (knownIssue) {
-      return knownIssue
+  const triedWorkspaceIds = new Set<string>()
+  const lookupInStatus = async (
+    status: Pick<
+      LinearConnectionStatus,
+      'workspaces' | 'viewer' | 'activeWorkspaceId' | 'selectedWorkspaceId'
+    >
+  ): Promise<LinearIssue | null> => {
+    for (const workspaceId of findLinearIssueWorkspaceLookupIds(intent, status)) {
+      if (triedWorkspaceIds.has(workspaceId)) {
+        continue
+      }
+      triedWorkspaceIds.add(workspaceId)
+      const issue = await fetchMatchingLinearIssue(
+        intent,
+        workspaceId,
+        sourceContext,
+        fetchLinearIssue
+      )
+      if (issue) {
+        return issue
+      }
     }
+    return null
+  }
+
+  const knownIssue = await lookupInStatus(knownStatus)
+  if (knownIssue) {
+    return knownIssue
   }
 
   const currentStatus = await readLinearStatus(sourceContext).catch(() => null)
-  const currentWorkspaceId = currentStatus
-    ? findLinearIssueWorkspaceIdFromStatus(intent, currentStatus)
-    : null
-  if (!currentWorkspaceId || currentWorkspaceId === knownWorkspaceId) {
-    return null
-  }
-  return fetchMatchingLinearIssue(intent, currentWorkspaceId, sourceContext, fetchLinearIssue)
+  return currentStatus ? lookupInStatus(currentStatus) : null
 }

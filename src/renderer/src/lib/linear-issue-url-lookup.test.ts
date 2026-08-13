@@ -98,6 +98,32 @@ describe('Linear issue URL lookup', () => {
     })
   })
 
+  it('probes a legacy workspace that omitted its organization URL key', async () => {
+    const fetchLinearIssue = vi.fn(async () => issue())
+
+    await expect(
+      lookupLinearIssueUrl({
+        intent,
+        knownStatus: {
+          viewer: {
+            displayName: 'Linear User',
+            email: null,
+            organizationName: 'Saved Linear workspace'
+          },
+          activeWorkspaceId: 'legacy',
+          selectedWorkspaceId: 'legacy',
+          workspaces: [{ id: 'legacy', organizationName: 'Saved Linear workspace' } as never]
+        },
+        sourceContext: null,
+        fetchLinearIssue,
+        readLinearStatus: vi.fn()
+      })
+    ).resolves.toMatchObject({ identifier: 'STA-4084' })
+    expect(fetchLinearIssue).toHaveBeenCalledWith('STA-4084', 'legacy', {
+      sourceContext: null
+    })
+  })
+
   it('does not fall back to an all-workspaces lookup that can collide across organizations', async () => {
     const fetchLinearIssue = vi.fn(async () => issue('other'))
 

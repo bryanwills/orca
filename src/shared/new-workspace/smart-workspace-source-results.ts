@@ -235,7 +235,7 @@ export function buildSmartWorkspaceSourceRows({
     linearUrlIntent &&
     (mode === 'smart' || mode === 'linear')
   ) {
-    return resolvedLinearIssues
+    const linearRows = resolvedLinearIssues
       .filter((issue) => isSmartWorkspaceLinearIssueIntentMatch(linearUrlIntent, issue))
       .map((issue) => ({
         kind: 'linear' as const,
@@ -243,6 +243,11 @@ export function buildSmartWorkspaceSourceRows({
         issue
       }))
       .slice(0, resultLimit)
+    // Why: keep "use as workspace name" available; sourceIntent focuses the issue.
+    if (trimmed && mode === 'smart') {
+      return [{ kind: 'use-name' as const, value: 'use-name', name: trimmed }, ...linearRows]
+    }
+    return linearRows
   }
   if (trimmed && mode === 'smart') {
     // Why: stable cmdk value — embedding the query remounted the row every keystroke.

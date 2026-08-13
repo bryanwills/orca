@@ -175,6 +175,45 @@ export function findLinearIssueWorkspaceIdFromStatus(
   return selectedWorkspaceId ?? status.activeWorkspaceId ?? null
 }
 
+export function findLinearIssueWorkspaceLookupIds(
+  intent: LinearIssueUrlIntent,
+  status: Pick<
+    LinearConnectionStatus,
+    'workspaces' | 'viewer' | 'activeWorkspaceId' | 'selectedWorkspaceId'
+  >
+): string[] {
+  const ids: string[] = []
+  const seen = new Set<string>()
+  const push = (id: string | null | undefined): void => {
+    if (!id || id === 'all' || seen.has(id)) {
+      return
+    }
+    seen.add(id)
+    ids.push(id)
+  }
+
+  push(findLinearIssueWorkspaceIdFromStatus(intent, status))
+
+  // Why: saved API-key workspaces often omit organizationUrlKey. Probe those
+  // unknown-org workspaces and accept only an issue whose URL matches the org.
+  for (const workspace of status.workspaces ?? []) {
+    if (!workspace.organizationUrlKey) {
+      push(workspace.id)
+    }
+  }
+
+  if (!status.viewer?.organizationUrlKey && (status.workspaces?.length ?? 0) === 0) {
+    const selectedWorkspaceId =
+      status.selectedWorkspaceId && status.selectedWorkspaceId !== 'all'
+        ? status.selectedWorkspaceId
+        : null
+    push(selectedWorkspaceId)
+    push(status.activeWorkspaceId)
+  }
+
+  return ids
+}
+
 export function isLinearIssueUrlResolutionMatch(
   intent: LinearIssueUrlIntent,
   issue: Pick<LinearIssue, 'identifier' | 'url'>

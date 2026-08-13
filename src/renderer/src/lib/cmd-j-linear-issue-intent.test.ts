@@ -1,12 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import {
   findLinearIssueWorkspaceId,
+  findLinearIssueWorkspaceLookupIds,
   isLinearIssueUrlResolutionMatch,
   parseLinearIssueUrlIntent
 } from '../../../shared/linear-links'
 
 describe('Cmd+J Linear issue intent', () => {
   it('accepts canonical Linear issue URLs with optional slugs', () => {
+    expect(
+      parseLinearIssueUrlIntent(
+        'https://linear.app/stably/issue/STA-4052/agent-terminals-disappearing-randomly'
+      )
+    ).toEqual({ identifier: 'STA-4052', organizationUrlKey: 'stably' })
     expect(
       parseLinearIssueUrlIntent(
         ' https://linear.app/stably/issue/sta-4084/restore-shell-integration '
@@ -47,6 +53,29 @@ describe('Cmd+J Linear issue intent', () => {
     expect(findLinearIssueWorkspaceId(intent, workspaces)).toBe('workspace-stably')
     expect(findLinearIssueWorkspaceId(intent, workspaces.slice(0, 1))).toBeNull()
     expect(findLinearIssueWorkspaceId(intent, undefined)).toBeNull()
+  })
+
+  it('includes legacy workspaces that omitted their organization URL key', () => {
+    const intent = { identifier: 'STA-4052', organizationUrlKey: 'stably' }
+
+    expect(
+      findLinearIssueWorkspaceLookupIds(intent, {
+        viewer: {
+          displayName: 'Linear User',
+          email: null,
+          organizationName: 'Saved Linear workspace'
+        },
+        activeWorkspaceId: 'legacy',
+        selectedWorkspaceId: 'legacy',
+        workspaces: [{ id: 'legacy' } as never]
+      })
+    ).toEqual(['legacy'])
+    expect(
+      findLinearIssueWorkspaceLookupIds(intent, {
+        viewer: null,
+        workspaces: [{ id: 'other-workspace', organizationUrlKey: 'other' } as never]
+      })
+    ).toEqual([])
   })
 
   it('rejects a lookup from a different identifier or known Linear organization', () => {

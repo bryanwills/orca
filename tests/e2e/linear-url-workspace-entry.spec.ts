@@ -140,6 +140,12 @@ test.describe('Linear URL workspace entry', () => {
       name: `${LINEAR_ISSUE.identifier} ${LINEAR_ISSUE.title}`,
       exact: true
     })
+    const useNameRow = orcaPage.getByRole('option', {
+      name: `Use "${LINEAR_URL}" as workspace name`,
+      exact: true
+    })
+    await expect(useNameRow).toBeVisible()
+    await expect(useNameRow).not.toHaveAttribute('data-selected', 'true')
     await expect(issueRow).toContainText(LINEAR_ISSUE.title)
     await expect(issueRow).toHaveAttribute('data-selected', 'true')
     await testInfo.attach('linear-url-smart-entry-selected.png', {
