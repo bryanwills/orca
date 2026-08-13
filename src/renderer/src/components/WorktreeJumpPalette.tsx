@@ -15,7 +15,6 @@ import {
   FileText,
   FolderTree,
   Globe,
-  Plus,
   Server,
   ServerOff,
   Smartphone,
@@ -175,23 +174,35 @@ import { resolvePaletteFocusRestoreTarget } from '@/components/cmd-j/palette-foc
 import { selectWorktreePaletteCacheInputs } from '@/components/cmd-j/worktree-palette-cache-inputs'
 import { getRepoHostIdentity } from '@/store/slices/repo-host-identity'
 import { buildPluginQuickActions } from '@/components/cmd-j/plugin-quick-actions'
+import { PaletteCreateWorktreeRow } from '@/components/cmd-j/PaletteCreateWorktreeRow'
 import { WorkspaceEmojiSuggestionPopover } from '@/components/workspace-emoji/WorkspaceEmojiSuggestionPopover'
 import { useWorkspaceEmojiShortcodeInput } from '@/components/workspace-emoji/useWorkspaceEmojiShortcodeInput'
 import { usePluginCommands } from '@/store/plugin-panels'
 import {
   getComposerEligibleRepos,
+  resolveComposerActiveRepoId,
   resolveComposerGitRepoId
 } from '@/lib/new-workspace-composer-repo'
+import { resolveWorkspaceCreationTarget } from '@/lib/project-host-workspace-target'
 import { lookupGitHubWorkItemForSource } from '@/lib/github-work-item-source-lookup'
+import { buildLinearIssueLinkedWorkItem } from '@/lib/linear-linked-work-item'
+import { lookupLinearIssueUrl } from '@/lib/linear-issue-url-lookup'
+import { isWorktreePaletteQueryTooLarge } from '@/lib/worktree-palette-query-bounds'
+import { parseLinearIssueUrlIntent } from '../../../shared/linear-links'
 import type { SettingsNavTarget } from '@/lib/settings-navigation-types'
 import { getHostDisplayLabelOverrides } from '../../../shared/host-setting-overrides'
 import {
   getSettingsFocusedExecutionHostId,
   isRuntimeOwnedSshTargetId
 } from '../../../shared/execution-host'
-import type { TerminalTab, Worktree } from '../../../shared/types'
+import type { LinearIssue, TerminalTab, Worktree } from '../../../shared/types'
 import { isGitRepoKind } from '../../../shared/repo-kind'
-import { buildTaskSourceContextFromRepo } from '../../../shared/task-source-context'
+import {
+  buildTaskSourceContextFromRepo,
+  normalizeTaskSourceContext,
+  type TaskSourceContext
+} from '../../../shared/task-source-context'
+import { getLinearIssueWorkspaceName } from '../../../shared/workspace-name'
 import { translate } from '@/i18n/i18n'
 
 type WorktreePaletteItem = {
@@ -252,6 +263,14 @@ type HintRow = {
 type CreateWorktreePaletteItem = {
   id: typeof CREATE_WORKTREE_ITEM_ID
   type: 'create-worktree'
+}
+
+type CmdJLinearIssuePreview = {
+  query: string
+  issue: LinearIssue | null
+  loading: boolean
+  initialRepoId: string | null
+  sourceContext: TaskSourceContext | null
 }
 
 // Why: keep quick actions curated — Cmd+J is a fast intent surface, not a dump of every setup button.
@@ -374,12 +393,26 @@ function getComposerPrefetchRepoId(
   state: ReturnType<typeof useAppStore.getState>,
   initialRepoId?: string
 ): string | null {
+  const eligibleRepos = getComposerEligibleRepos(state.repos)
   return resolveComposerGitRepoId({
-    eligibleRepos: getComposerEligibleRepos(state.repos),
+    eligibleRepos,
     initialRepoId,
-    activeRepoId: state.activeRepoId,
+    activeRepoId: resolveComposerActiveRepoId(state.repos, eligibleRepos, state.activeRepoId),
     focusedHostScope: state.workspaceHostScope
   })
+}
+
+function getComposerDefaultWorkspaceTarget(state: ReturnType<typeof useAppStore.getState>) {
+  const eligibleRepos = getComposerEligibleRepos(state.repos)
+  const activeRepoId = resolveComposerActiveRepoId(state.repos, eligibleRepos, state.activeRepoId)
+  const resolution = resolveWorkspaceCreationTarget({
+    eligibleRepos,
+    projects: state.projects,
+    projectHostSetups: state.projectHostSetups,
+    activeRepoId,
+    focusedHostScope: state.workspaceHostScope
+  })
+  return resolution.status === 'ready' ? resolution.target : null
 }
 
 function appendPaletteListEntries(
@@ -639,7 +672,15 @@ function WorktreeJumpPaletteContent({
 
   const [query, setQuery] = useState('')
   const deferredQuery = useDeferredValue(query)
+  const liveQueryRef = useRef(query)
+  liveQueryRef.current = query
   const [selectedItemId, setSelectedItemId] = useState('')
+  const [linearIssuePreview, setLinearIssuePreview] = useState<CmdJLinearIssuePreview | null>(null)
+  const linearIssueLookupGenerationRef = useRef(0)
+  const linearIssueLookupRef = useRef<{
+    query: string
+    promise: Promise<CmdJLinearIssuePreview>
+  } | null>(null)
   // Why: the id cmdk auto-selected for the last committed list, so a late recent-order snapshot can
   // tell "nobody has moved the highlight yet" from "the user arrowed somewhere deliberately".
   const autoSelectedItemIdRef = useRef<string | null>(null)
@@ -1613,7 +1654,10 @@ function WorktreeJumpPaletteContent({
   const digitShortcutModifiers =
     useShortcutKeyComboDetails(DIGIT_INDEX_ACTION_ID)[0]?.keys.slice(0, -1) ?? []
 
-  const { createWorktreeName, showCreateAction } = useMemo(
+  const {
+    createWorktreeName: deferredCreateWorktreeName,
+    showCreateAction: deferredShowCreateAction
+  } = useMemo(
     () =>
       getWorktreePaletteCreateActionState({
         canCreateWorktree,
@@ -1621,6 +1665,89 @@ function WorktreeJumpPaletteContent({
       }),
     [canCreateWorktree, deferredQuery]
   )
+  const linearIssueUrlIntent = useMemo(
+    () => (isWorktreePaletteQueryTooLarge(query) ? null : parseLinearIssueUrlIntent(query)),
+    [query]
+  )
+  const createWorktreeName = linearIssueUrlIntent ? query.trim() : deferredCreateWorktreeName
+  const showCreateAction = deferredShowCreateAction || linearIssueUrlIntent !== null
+  const prioritizeLinearCreateAction = linearIssueUrlIntent !== null
+
+  // Why: arm the lookup before Enter can target the newly rendered Linear row.
+  useLayoutEffect(() => {
+    const generation = ++linearIssueLookupGenerationRef.current
+    linearIssueLookupRef.current = null
+    if (!visible || !linearIssueUrlIntent) {
+      setLinearIssuePreview(null)
+      return
+    }
+
+    const state = useAppStore.getState()
+    const workspaceTarget = getComposerDefaultWorkspaceTarget(state)
+    const initialRepoId = workspaceTarget?.repoId ?? null
+    const sourceContext = workspaceTarget
+      ? buildTaskSourceContextFromRepo({
+          provider: 'linear',
+          projectId: workspaceTarget.projectId,
+          repo: workspaceTarget.repo,
+          projectHostSetupId: workspaceTarget.projectHostSetupId
+        })
+      : null
+    const pendingPreview: CmdJLinearIssuePreview = {
+      query: createWorktreeName,
+      issue: null,
+      loading: true,
+      initialRepoId,
+      sourceContext
+    }
+    setLinearIssuePreview(pendingPreview)
+
+    const promise = lookupLinearIssueUrl({
+      intent: linearIssueUrlIntent,
+      knownStatus: state.linearStatus,
+      sourceContext,
+      fetchLinearIssue: state.fetchLinearIssue
+    })
+      .catch(() => null)
+      .then(
+        (issue): CmdJLinearIssuePreview => ({
+          ...pendingPreview,
+          issue,
+          loading: false
+        })
+      )
+    linearIssueLookupRef.current = { query: createWorktreeName, promise }
+    void promise.then((preview) => {
+      if (linearIssueLookupGenerationRef.current === generation) {
+        setLinearIssuePreview(preview)
+      }
+    })
+
+    return () => {
+      if (linearIssueLookupGenerationRef.current === generation) {
+        linearIssueLookupGenerationRef.current += 1
+      }
+    }
+  }, [createWorktreeName, linearIssueUrlIntent, visible])
+
+  const currentLinearIssuePreview =
+    linearIssuePreview?.query === createWorktreeName ? linearIssuePreview : null
+  const [linearLoadingFeedbackQuery, setLinearLoadingFeedbackQuery] = useState<string | null>(null)
+  useEffect(() => {
+    if (!currentLinearIssuePreview?.loading) {
+      setLinearLoadingFeedbackQuery(null)
+      return
+    }
+    setLinearLoadingFeedbackQuery(null)
+    const timer = window.setTimeout(
+      () => setLinearLoadingFeedbackQuery(currentLinearIssuePreview.query),
+      200
+    )
+    return () => window.clearTimeout(timer)
+  }, [currentLinearIssuePreview?.loading, currentLinearIssuePreview?.query])
+  const showLinearLoadingFeedback =
+    currentLinearIssuePreview?.loading === true &&
+    linearLoadingFeedbackQuery === currentLinearIssuePreview.query
 
   const listEntries = useMemo<PaletteListEntry[]>(() => {
     const entries: PaletteListEntry[] = []
@@ -1747,11 +1874,20 @@ function WorktreeJumpPaletteContent({
       }
     }
 
+    if (!hasQuery && showCreateAction && prioritizeLinearCreateAction) {
+      entries.push({ id: CREATE_WORKTREE_ITEM_ID, type: 'create-worktree' })
+      return entries
+    }
+
     if (!hasQuery) {
       // Why: the recent section leads the empty-query view; nothing else in this branch is populated.
       pushOpenTabSection()
       pushWorktreeSection()
       return entries
+    }
+
+    if (showCreateAction && prioritizeLinearCreateAction) {
+      entries.push({ id: CREATE_WORKTREE_ITEM_ID, type: 'create-worktree' })
     }
 
     // Typed query with both open tabs and worktrees: soft-split so the trailing
@@ -1803,7 +1939,7 @@ function WorktreeJumpPaletteContent({
       // Trailing rest is already on screen; only hard-cap overflow needs a hint.
       pushOverflowHint(trailingHintId, multiPrimaryLayout.trailingHardOverflowCount)
       pushProjectAndMiddleSections()
-      if (showCreateAction) {
+      if (showCreateAction && !prioritizeLinearCreateAction) {
         entries.push({ id: CREATE_WORKTREE_ITEM_ID, type: 'create-worktree' })
       }
       return entries
@@ -1817,13 +1953,20 @@ function WorktreeJumpPaletteContent({
     if (!openTabsLeadSections) {
       pushOpenTabSection()
     }
-    if (showCreateAction) {
+    if (showCreateAction && !prioritizeLinearCreateAction) {
       // Why: creating a workspace is the fallback for "nothing here matches", so it sits below every
       // real result — never above them, where it would steal the default selection from a match.
       entries.push({ id: CREATE_WORKTREE_ITEM_ID, type: 'create-worktree' })
     }
     return entries
-  }, [hasQuery, openTabsLeadSections, paletteSections, showCreateAction, worktreeItems.length])
+  }, [
+    hasQuery,
+    openTabsLeadSections,
+    paletteSections,
+    prioritizeLinearCreateAction,
+    showCreateAction,
+    worktreeItems.length
+  ])
 
   // Why derive from listEntries: multi-primary interleave must stay identical for
   // empty-state counts and keyboard selection — dual-path builders drifted before.
@@ -2262,12 +2405,15 @@ function WorktreeJumpPaletteContent({
   }, [handleSelectItem, hasQuery, query.length, visible])
 
   const handleCreateWorktree = useCallback(() => {
-    skipRestoreFocusRef.current = true
     const trimmed = createWorktreeName.trim()
+    if (liveQueryRef.current.trim() !== trimmed) {
+      return
+    }
     const ghLink = parseGitHubIssueOrPRLink(trimmed)
     const ghNumber = parseGitHubIssueOrPRNumber(trimmed)
 
     const openComposer = (data: Record<string, unknown>): void => {
+      skipRestoreFocusRef.current = true
       prefetchCreateWorkspaceBaseForComposer(
         typeof data.initialRepoId === 'string' ? data.initialRepoId : undefined
       )
@@ -2277,6 +2423,54 @@ function WorktreeJumpPaletteContent({
       queueMicrotask(() =>
         openModal('new-workspace-composer', { ...data, telemetrySource: 'command_palette' })
       )
+    }
+
+    if (linearIssueUrlIntent) {
+      const openLinearIssueComposer = async (): Promise<void> => {
+        const lookup = linearIssueLookupRef.current
+        const preview = currentLinearIssuePreview?.loading
+          ? await lookup?.promise
+          : (currentLinearIssuePreview ?? (await lookup?.promise))
+        if (
+          lookup?.query !== trimmed ||
+          linearIssueLookupRef.current !== lookup ||
+          liveQueryRef.current.trim() !== trimmed
+        ) {
+          return
+        }
+        const composerData = preview?.issue
+          ? (() => {
+              const taskSourceContext = preview.sourceContext
+                ? normalizeTaskSourceContext({
+                    ...preview.sourceContext,
+                    providerIdentity: {
+                      provider: 'linear',
+                      workspaceId: preview.issue.workspaceId ?? null,
+                      workspaceName: preview.issue.workspaceName ?? null,
+                      teamId: preview.issue.team.id,
+                      teamKey: preview.issue.team.key
+                    },
+                    accountLabel: preview.issue.workspaceName ?? null
+                  })
+                : null
+              return {
+                prefilledName: getLinearIssueWorkspaceName(preview.issue),
+                linkedWorkItem: buildLinearIssueLinkedWorkItem(preview.issue),
+                ...(preview.initialRepoId ? { initialRepoId: preview.initialRepoId } : {}),
+                ...(taskSourceContext ? { taskSourceContext } : {})
+              }
+            })()
+          : preview?.initialRepoId
+            ? { prefilledName: trimmed, initialRepoId: preview.initialRepoId }
+            : { prefilledName: trimmed }
+
+        if (useAppStore.getState().activeModal !== 'worktree-palette') {
+          return
+        }
+        openComposer(composerData)
+      }
+      void openLinearIssueComposer()
+      return
     }
 
     // Case 1: user pasted a GH issue/PR URL.
@@ -2290,6 +2484,7 @@ function WorktreeJumpPaletteContent({
       )
       const activeMatch = matches.find((w) => w.repoId === state.activeRepoId) ?? matches[0]
       if (activeMatch) {
+        skipRestoreFocusRef.current = true
         closeModal()
         // Why: #9939 — jumping to an already-open workspace must focus its own terminal.
         const activation = activateAndRevealWorktree(activeMatch.id)
@@ -2321,6 +2516,7 @@ function WorktreeJumpPaletteContent({
       )
       const activeMatch = matches.find((w) => w.repoId === state.activeRepoId) ?? matches[0]
       if (activeMatch) {
+        skipRestoreFocusRef.current = true
         closeModal()
         // Why: #9939 — jumping to an already-open workspace must focus its own terminal.
         const activation = activateAndRevealWorktree(activeMatch.id)
@@ -2347,6 +2543,7 @@ function WorktreeJumpPaletteContent({
       })
       const lookupToken = createLookupGuard.start()
       preserveCreateLookupOnCloseRef.current = true
+      skipRestoreFocusRef.current = true
       recordFeatureInteraction('cmd-j-create-workspace')
       closeModal()
       void lookupGitHubWorkItemForSource({
@@ -2400,7 +2597,9 @@ function WorktreeJumpPaletteContent({
     closeModal,
     createLookupGuard,
     createWorktreeName,
+    currentLinearIssuePreview,
     focusFallbackSurface,
+    linearIssueUrlIntent,
     openModal,
     prefetchCreateWorkspaceBaseForComposer,
     recordFeatureInteraction,
@@ -2603,26 +2802,20 @@ function WorktreeJumpPaletteContent({
               }
 
               if (entry.type === 'create-worktree') {
+                const linearPreviewIssue = currentLinearIssuePreview?.issue ?? null
+                const linearPreviewLoading =
+                  linearIssueUrlIntent !== null && currentLinearIssuePreview?.loading !== false
                 return (
-                  <CommandItem
+                  <PaletteCreateWorktreeRow
                     key={entry.id}
-                    value={CREATE_WORKTREE_ITEM_ID}
-                    onSelect={handleCreateWorktree}
                     className={cn(JUMP_PALETTE_ITEM_CLASSNAME, 'mt-1 py-1.5')}
-                  >
-                    <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-dashed border-border/60 bg-muted/25 text-muted-foreground/70">
-                      <Plus size={13} aria-hidden="true" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="text-[14px] font-semibold tracking-[-0.01em] text-foreground">
-                        {translate(
-                          'auto.components.WorktreeJumpPalette.95be6587d3',
-                          'Create worktree "{{value0}}"',
-                          { value0: createWorktreeName }
-                        )}
-                      </div>
-                    </div>
-                  </CommandItem>
+                    createWorktreeName={createWorktreeName}
+                    linearIdentifier={linearIssueUrlIntent?.identifier ?? null}
+                    linearIssue={linearPreviewIssue}
+                    linearPending={linearPreviewLoading}
+                    showLinearLoadingFeedback={showLinearLoadingFeedback}
+                    onSelect={handleCreateWorktree}
+                  />
                 )
               }
 

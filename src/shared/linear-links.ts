@@ -1,3 +1,5 @@
+import type { LinearConnectionStatus, LinearIssue, LinearWorkspace } from './types'
+
 export function buildLinearTeamUrl(args: {
   organizationUrlKey?: string | null
   teamKey?: string | null
@@ -56,6 +58,11 @@ export type ParsedLinearIssueInput = {
   organizationUrlKey?: string
 }
 
+export type LinearIssueUrlIntent = {
+  identifier: string
+  organizationUrlKey: string
+}
+
 export type LinearIssueLinkUpdates = {
   linkedLinearIssue: string | null
   linkedLinearIssueWorkspaceId: string | null
@@ -103,6 +110,83 @@ export function parseLinearIssueInput(input: string): ParsedLinearIssueInput | n
   } catch {
     return null
   }
+}
+
+export function parseLinearIssueUrlIntent(input: string): LinearIssueUrlIntent | null {
+  const trimmed = input.trim()
+  try {
+    const url = new URL(trimmed)
+    const pathMatch = /^\/([^/]+)\/issue\/([^/]+)(?:\/[^/]+)?\/?$/.exec(url.pathname)
+    if (
+      (url.protocol !== 'https:' && url.protocol !== 'http:') ||
+      url.host !== 'linear.app' ||
+      url.username !== '' ||
+      url.password !== '' ||
+      !pathMatch
+    ) {
+      return null
+    }
+    const organizationUrlKey = decodeURIComponent(pathMatch[1])
+    const identifier = decodeURIComponent(pathMatch[2])
+    if (
+      !/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(organizationUrlKey) ||
+      !LINEAR_IDENTIFIER_PATTERN.test(identifier)
+    ) {
+      return null
+    }
+    return { identifier: identifier.toUpperCase(), organizationUrlKey }
+  } catch {
+    return null
+  }
+}
+
+export function findLinearIssueWorkspaceId(
+  intent: LinearIssueUrlIntent,
+  workspaces: readonly Pick<LinearWorkspace, 'id' | 'organizationUrlKey'>[] | undefined
+): string | null {
+  const organizationUrlKey = intent.organizationUrlKey.toLowerCase()
+  return (
+    workspaces?.find(
+      (workspace) => workspace.organizationUrlKey?.toLowerCase() === organizationUrlKey
+    )?.id ?? null
+  )
+}
+
+export function findLinearIssueWorkspaceIdFromStatus(
+  intent: LinearIssueUrlIntent,
+  status: Pick<
+    LinearConnectionStatus,
+    'workspaces' | 'viewer' | 'activeWorkspaceId' | 'selectedWorkspaceId'
+  >
+): string | null {
+  const workspaceId = findLinearIssueWorkspaceId(intent, status.workspaces)
+  if (workspaceId) {
+    return workspaceId
+  }
+  if (
+    status.viewer?.organizationUrlKey?.toLowerCase() !== intent.organizationUrlKey.toLowerCase()
+  ) {
+    return null
+  }
+  const selectedWorkspaceId =
+    status.selectedWorkspaceId && status.selectedWorkspaceId !== 'all'
+      ? status.selectedWorkspaceId
+      : null
+  return selectedWorkspaceId ?? status.activeWorkspaceId ?? null
+}
+
+export function isLinearIssueUrlResolutionMatch(
+  intent: LinearIssueUrlIntent,
+  issue: Pick<LinearIssue, 'identifier' | 'url'>
+): boolean {
+  if (issue.identifier.toUpperCase() !== intent.identifier.toUpperCase()) {
+    return false
+  }
+  const issueOrganizationUrlKey = getLinearOrganizationUrlKeyFromIssueUrl(issue.url)
+  return (
+    issueOrganizationUrlKey !== null &&
+    issueOrganizationUrlKey.toLowerCase() === intent.organizationUrlKey.toLowerCase()
+  )
 }
 
 export const LINEAR_ISSUE_LINK_CLEARED: LinearIssueLinkUpdates = {
