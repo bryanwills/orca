@@ -118,6 +118,7 @@ import { mkdir, readFile, readdir, rm, stat } from 'node:fs/promises'
 import { resolveWorktreeCreateBase } from '../worktree-create-base'
 import { resolveWorktreeAddBaseRef } from '../../shared/worktree-base-ref'
 import { OrchestrationDb } from './orchestration/db'
+import { FederationRelayScheduler } from './orchestration/federation-relay-scheduler'
 import { reconcileRequestedWorkerTerminalReleases } from './orchestration/worker-terminal-release-reconciliation'
 import {
   classifyWorkerTerminalProcessIncarnation,
@@ -2698,12 +2699,17 @@ export class OrcaRuntimeService {
   private managedHookReconciliationGeneration = 0
   private managedHookReconciliationTail: Promise<void> = Promise.resolve()
   private readonly orchestrationEnvironmentTransport: OrchestrationEnvironmentTransport | null
-  private readonly orchestrationFederationTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private readonly orchestrationFederationSyncs = new Map<
     string,
     { db: OrchestrationDb; promise: Promise<void> }
   >()
   private readonly orchestrationFederationWarnings = new Set<string>()
+  private readonly orchestrationFederationRelayScheduler = new FederationRelayScheduler({
+    isEligible: (dispatchId) =>
+      this.getOrchestrationDb().isFederatedDispatchRelayEligible(dispatchId),
+    sync: (dispatchId) => this.syncOrchestrationFederatedDispatch(dispatchId),
+    onIneligible: (dispatchId) => this.orchestrationFederationWarnings.delete(dispatchId)
+  })
   private rendererGraphEpoch = 0
   private graphStatus: RuntimeGraphStatus = 'unavailable'
   private authoritativeWindowId: number | null = null
@@ -4712,47 +4718,14 @@ export class OrcaRuntimeService {
     if (!this.orchestrationEnvironmentTransport) {
       return
     }
-    for (const dispatch of this.getOrchestrationDb().listActiveFederatedDispatches(runId)) {
-      if (this.orchestrationFederationTimers.has(dispatch.dispatch_id)) {
-        continue
-      }
-      let retryDelayMs = 1_000
-      const tick = async () => {
-        const currentTimer = this.orchestrationFederationTimers.get(dispatch.dispatch_id)
-        if (!this.getOrchestrationDb().isFederatedDispatchRelayEligible(dispatch.dispatch_id)) {
-          this.orchestrationFederationTimers.delete(dispatch.dispatch_id)
-          this.orchestrationFederationWarnings.delete(dispatch.dispatch_id)
-          return
-        }
-        try {
-          await this.syncOrchestrationFederatedDispatch(dispatch.dispatch_id)
-          retryDelayMs = 1_000
-        } catch {
-          retryDelayMs = Math.min(retryDelayMs * 2, 30_000)
-        }
-        if (this.orchestrationFederationTimers.get(dispatch.dispatch_id) !== currentTimer) {
-          return
-        }
-        if (!this.getOrchestrationDb().isFederatedDispatchRelayEligible(dispatch.dispatch_id)) {
-          this.orchestrationFederationTimers.delete(dispatch.dispatch_id)
-          this.orchestrationFederationWarnings.delete(dispatch.dispatch_id)
-          return
-        }
-        const timer = setTimeout(tick, retryDelayMs)
-        timer.unref?.()
-        this.orchestrationFederationTimers.set(dispatch.dispatch_id, timer)
-      }
-      const timer = setTimeout(tick, 0)
-      timer.unref?.()
-      this.orchestrationFederationTimers.set(dispatch.dispatch_id, timer)
-    }
+    const dispatchIds = this.getOrchestrationDb()
+      .listActiveFederatedDispatches(runId)
+      .map((dispatch) => dispatch.dispatch_id)
+    this.orchestrationFederationRelayScheduler.ensure(dispatchIds)
   }
 
   stopOrchestrationFederationRelay(): void {
-    for (const timer of this.orchestrationFederationTimers.values()) {
-      clearTimeout(timer)
-    }
-    this.orchestrationFederationTimers.clear()
+    this.orchestrationFederationRelayScheduler.stop()
     this.orchestrationFederationWarnings.clear()
     this.orchestrationFederationSyncs.clear()
     clearFederationAckCheckpoints(this)
