@@ -678,23 +678,16 @@ describe('orchestration federation lifecycle settlement', () => {
 
     homeRuntime.ensureOrchestrationFederationRelay()
     await vi.waitFor(() => expect(ackAttempts).toBe(1))
-    const acknowledgedAfterLoss =
-      (
-        homeDb.getFederatedDispatch(dispatch.id) as unknown as {
-          to_home_acknowledged_sequence?: number
-        }
-      ).to_home_acknowledged_sequence ?? 0
+    const acknowledgedAfterLoss = homeDb.getFederatedDispatch(
+      dispatch.id
+    )?.to_home_acknowledged_sequence
     restartHomeRuntime()
-    homeRuntime.ensureOrchestrationFederationRelay()
     await vi.waitFor(() =>
       expect(workerDb.getRemoteDispatchAttachment(dispatch.id)?.state).toBe('succeeded')
     )
-    const acknowledgedAfterRetry =
-      (
-        homeDb.getFederatedDispatch(dispatch.id) as unknown as {
-          to_home_acknowledged_sequence?: number
-        }
-      ).to_home_acknowledged_sequence ?? 0
+    const acknowledgedAfterRetry = homeDb.getFederatedDispatch(
+      dispatch.id
+    )?.to_home_acknowledged_sequence
     restartHomeRuntime()
     homeRuntime.ensureOrchestrationFederationRelay()
     await homeRuntime.syncOrchestrationFederation()

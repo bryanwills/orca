@@ -3830,15 +3830,15 @@ export class OrcaRuntimeService {
       const { app } = require('electron')
       const dbPath = join(app.getPath('userData'), 'orchestration.db')
       this._orchestrationDb = new OrchestrationDb(dbPath)
+      this.ensureOrchestrationFederationRelay()
     }
     return this._orchestrationDb
   }
 
   setOrchestrationDb(db: OrchestrationDb): void {
-    clearFederationAckCheckpoints(this)
-    this.orchestrationFederationSyncs.clear()
-    this.orchestrationFederationWarnings.clear()
+    this.stopOrchestrationFederationRelay()
     this._orchestrationDb = db
+    this.ensureOrchestrationFederationRelay()
   }
 
   private getLegacyWorkerTerminalRecoveryPlan(): LegacyWorkerTerminalRecoveryPlan {
