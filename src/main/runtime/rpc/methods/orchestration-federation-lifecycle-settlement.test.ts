@@ -426,7 +426,9 @@ describe('orchestration federation lifecycle settlement', () => {
       }).toEqual({ task: 'completed', acknowledged: 0, pending: 1 })
 
       restartHomeRuntime()
-      await homeRuntime.syncOrchestrationFederatedDispatch(dispatch.id)
+      await vi.waitFor(() =>
+        expect(workerDb.listPendingFederationRelay(dispatch.id, 'to_home')).toHaveLength(0)
+      )
 
       expect({
         acknowledged: homeDb.getFederatedDispatch(dispatch.id)?.to_home_acknowledged_sequence,

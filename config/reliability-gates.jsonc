@@ -8018,8 +8018,8 @@
           "platform": "macos",
           "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/rpc/methods/orchestration-federation-lifecycle-settlement.test.ts --reporter=dot",
           "result": "passed",
-          "durationSeconds": 6.29,
-          "summary": "The ab75669b mixed-version oracle passed all 21 cases. Protocol v1/v2 clients started fresh workers on a current server, completed success and failure with explicit legacy authority, and retried a lost ACK after Run-home restart; current-protocol settlement and duplicate-report controls stayed green."
+          "durationSeconds": 6.02,
+          "summary": "The 70f1d52f mixed-version oracle passed all 21 cases. Protocol v1/v2 clients started fresh workers on a current server, completed success and failure with explicit legacy authority, and automatically retried a lost ACK after Run-home restart through the production scheduler; current-protocol settlement and duplicate-report controls stayed green."
         },
         {
           "date": "2026-08-13",
@@ -8028,7 +8028,7 @@
           "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/rpc/methods/orchestration-federation-lifecycle-settlement.test.ts --reporter=dot",
           "result": "failed",
           "durationSeconds": 4.21,
-          "summary": "The byte-identical ab75669b oracle failed 6 mixed-version cases while 15 controls passed: success and failure through both negotiated versions plus both lost-ACK restart cases."
+          "summary": "The byte-identical 70f1d52f oracle failed 6 mixed-version cases while 15 controls passed when the fresh v1/v2 refusal was restored: success and failure through both negotiated versions plus both lost-ACK restart cases."
         },
         {
           "date": "2026-08-12",
@@ -8194,7 +8194,7 @@
       },
       "redGreenEvidence": {
         "status": "complete",
-        "evidence": "The byte-identical ac7bdf4e federation oracle failed 7 of 17 tests on affected 09ec516ae5 and latest main 1136503c6a, passed 17 of 17 on candidate 008f740161, and returned to the same 7 failures when the claimed production files were restored to latest main in 3a15d3ed5d. The follow-up byte-identical ab75669b oracle passes 21 of 21 with fresh v1/v2 compatibility and fails 6 mixed-version cases while 15 controls pass when only the refusal is restored. Together they prove production-scheduler dropped-ACK replay across Run-home restarts, identical and preexisting same-outcome retry convergence, conflicting-outcome refusal, fresh and persisted old-client/current-server completion, current-client/old-server completion, and legacy lost-ACK retry without newer-only wire fields. The compiled-CLI Electron oracle separately failed on main 5ea7df1a5b, passed on candidate d697666ce8, and reproduced its original failure with the claimed production files disabled. Distinct installed A/B and CI artifacts are still needed."
+        "evidence": "The byte-identical ac7bdf4e federation oracle failed 7 of 17 tests on affected 09ec516ae5 and latest main 1136503c6a, passed 17 of 17 on candidate 008f740161, and returned to the same 7 failures when the claimed production files were restored to latest main in 3a15d3ed5d. The follow-up byte-identical 70f1d52f oracle passes 21 of 21 with fresh v1/v2 compatibility and fails 6 mixed-version cases while 15 controls pass when only the refusal is restored. Together they prove production-scheduler dropped-ACK replay across Run-home restarts for current and legacy protocols, identical and preexisting same-outcome retry convergence, conflicting-outcome refusal, fresh and persisted old-client/current-server completion, current-client/old-server completion, and legacy wire isolation. The compiled-CLI Electron oracle separately failed on main 5ea7df1a5b, passed on candidate d697666ce8, and reproduced its original failure with the claimed production files disabled. Distinct installed A/B and CI artifacts are still needed."
       },
       "performanceBudget": {
         "required": true,

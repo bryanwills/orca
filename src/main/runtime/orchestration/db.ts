@@ -4569,8 +4569,7 @@ export class OrchestrationDb {
          WHERE (
              wd.state IN ('starting', 'ready', 'stopping', 'start_unknown', 'stop_unknown')
              OR (
-               fd.protocol_version >= ${ORCHESTRATION_FEDERATION_LIFECYCLE_SETTLEMENT_PROTOCOL_VERSION}
-               AND fd.to_home_acknowledged_sequence < fd.to_home_imported_sequence
+               fd.to_home_acknowledged_sequence < fd.to_home_imported_sequence
              )
            )
            AND (? IS NULL OR dc.run_id = ?)
@@ -4590,8 +4589,7 @@ export class OrchestrationDb {
              AND (
                wd.state IN ('starting', 'ready', 'stopping', 'start_unknown', 'stop_unknown')
                OR (
-                 fd.protocol_version >= ${ORCHESTRATION_FEDERATION_LIFECYCLE_SETTLEMENT_PROTOCOL_VERSION}
-                 AND fd.to_home_acknowledged_sequence < fd.to_home_imported_sequence
+                 fd.to_home_acknowledged_sequence < fd.to_home_imported_sequence
                )
              )`
         )
