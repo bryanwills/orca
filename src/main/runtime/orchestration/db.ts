@@ -4573,7 +4573,7 @@ export class OrchestrationDb {
              )
            )
            AND (? IS NULL OR dc.run_id = ?)
-         ORDER BY fd.rowid`
+         ORDER BY fd.rowid DESC`
       )
       .all(runId ?? null, runId ?? null) as FederatedDispatchRow[]
   }

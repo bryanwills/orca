@@ -54,6 +54,27 @@ describe('OrchestrationDb worker Dispatch state', () => {
     ])
   })
 
+  it('lists active federated Dispatches newest first', () => {
+    const d = createDb()
+    const dispatchIds = Array.from({ length: 3 }, (_, index) => {
+      const task = d.createTask({ spec: `federated worker ${index}` })
+      return d.createStartingWorkerDispatch({
+        taskId: task.id,
+        startOptions: {},
+        federation: {
+          environmentId: 'env_remote',
+          environmentName: 'remote',
+          peerFingerprint: 'peer_remote',
+          protocolVersion: 3
+        }
+      }).dispatch.id
+    })
+
+    expect(d.listActiveFederatedDispatches().map((dispatch) => dispatch.dispatch_id)).toEqual(
+      dispatchIds.toReversed()
+    )
+  })
+
   it('requeues an active Task before settling a worker whose terminal is missing', () => {
     const d = createDb()
     const task = d.createTask({ spec: 'recover missing worker' })
