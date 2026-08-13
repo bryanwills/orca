@@ -46,7 +46,6 @@ export class FederationRelayScheduler {
     }
     this.timer = null
     this.timerDueAt = Number.POSITIVE_INFINITY
-    this.running = 0
     this.states.clear()
     this.ready.clear()
   }
@@ -122,6 +121,8 @@ export class FederationRelayScheduler {
       // The scheduler owns retry timing; sync logs the first failure per Dispatch.
     }
     if (generation !== this.generation) {
+      this.running -= 1
+      this.schedule()
       return
     }
     this.running -= 1

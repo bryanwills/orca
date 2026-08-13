@@ -7958,7 +7958,7 @@
           "assertions": [
             "1,000 eligible Dispatches share at most one timer and four concurrent syncs",
             "every eligible Dispatch receives a turn before successful polling repeats",
-            "stopped in-flight work cannot rearm a replacement scheduler generation"
+            "DB replacement preserves the global four-sync cap while old uncancellable work drains, and stopped work cannot rearm the replacement generation"
           ]
         },
         {

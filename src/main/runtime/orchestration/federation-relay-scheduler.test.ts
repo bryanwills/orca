@@ -57,10 +57,17 @@ describe('FederationRelayScheduler', () => {
   it('does not let stopped work rearm a replaced scheduler generation', async () => {
     vi.useFakeTimers()
     const releases = new Map<string, () => void>()
+    let active = 0
+    let peak = 0
     const sync = vi.fn(
       (dispatchId: string) =>
         new Promise<void>((resolve) => {
-          releases.set(dispatchId, resolve)
+          active += 1
+          peak = Math.max(peak, active)
+          releases.set(dispatchId, () => {
+            active -= 1
+            resolve()
+          })
         })
     )
     const scheduler = new FederationRelayScheduler({
@@ -69,15 +76,23 @@ describe('FederationRelayScheduler', () => {
       onIneligible: () => {}
     })
 
-    scheduler.ensure(['old'])
+    const oldDispatches = Array.from({ length: 4 }, (_, index) => `old_${index}`)
+    const newDispatches = Array.from({ length: 4 }, (_, index) => `new_${index}`)
+    scheduler.ensure(oldDispatches)
     await vi.advanceTimersByTimeAsync(0)
     scheduler.stop()
-    scheduler.ensure(['new'])
+    scheduler.ensure(newDispatches)
     await vi.advanceTimersByTimeAsync(0)
-    releases.get('old')?.()
-    await vi.advanceTimersByTimeAsync(30_000)
+    expect(sync.mock.calls.map(([dispatchId]) => dispatchId)).toEqual(oldDispatches)
 
-    expect(sync.mock.calls.map(([dispatchId]) => dispatchId)).toEqual(['old', 'new'])
+    oldDispatches.forEach((dispatchId) => releases.get(dispatchId)?.())
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(sync.mock.calls.map(([dispatchId]) => dispatchId)).toEqual([
+      ...oldDispatches,
+      ...newDispatches
+    ])
+    expect(peak).toBe(4)
     scheduler.stop()
   })
 })
